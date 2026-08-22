@@ -3,16 +3,28 @@
 *.swp
 *~
 
-# Local env — never commit
+# Secrets / env — never commit
 .env
 .env.*
+local.properties
 
-# Android (added properly in Phase 0; keep basics now)
+# Gradle
+.gradle/
+build/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.cxx/
+.externalNativeBuild
+
+# Android build outputs & signing material
+app/build/
 *.apk
+*.aab
 *.keystore
 !debug.keystore
 
-# Kotlin/Gradle build output
-.gradle/
-build/
-local.properties
+# CI/tooling state
+.kotlin/
