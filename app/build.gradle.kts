@@ -76,6 +76,9 @@ dependencies {
     implementation(libs.kotlinx.datetime)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
+    // Ed25519 device identity (lightweight API only — no JCE provider
+    // registration, so Android's stripped BC namespace never conflicts).
+    implementation(libs.bouncycastle.provider)
 
     // Tests
     testImplementation(libs.junit)

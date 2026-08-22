@@ -32,6 +32,8 @@ import dev.magnor.kompakt.data.repository.OrganizationRepository
 import dev.magnor.kompakt.data.repository.SyncRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
+import dev.magnor.kompakt.data.security.InMemorySecretVault
+import dev.magnor.kompakt.data.security.SecretVault
 import dev.magnor.kompakt.domain.Agent
 import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.Area
@@ -45,6 +47,7 @@ import dev.magnor.kompakt.domain.Project
 import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.Task
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
@@ -66,7 +69,22 @@ sealed interface ServerMode {
 class AppContainer(
     val mode: ServerMode = ServerMode.Fake,
     val clock: () -> Instant = { FakeData.NOW },
+    secretVault: SecretVault? = null,
 ) {
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val scope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.Dispatchers.Default +
+            kotlinx.coroutines.SupervisorJob(),
+    )
+
+    private val vault: SecretVault = secretVault ?: InMemorySecretVault()
+
+    /**
+     * Device enrollment (Phase 4). Owns identity + the per-device token;
+     * when it reaches Active the container flips every repository from
+     * fakes to the live remote stack — no restart needed.
+     */
+    val enrollment: EnrollmentManager = EnrollmentManager(vault)
 
     val now: () -> Instant = clock
     val changeLog = FakeChangeLog(now)
@@ -90,10 +108,30 @@ class AppContainer(
     private val areaStore = FakeStore<Area>(EntityKind.AREA, changeLog, now)
     private val inboxStore = FakeStore<InboxItem>(EntityKind.INBOX_ITEM, changeLog, now)
 
-    // ---- remote plumbing (null in Fake mode) ----
+    // ---- remote plumbing (null while unenrolled / Fake mode) ----
 
-    private val remoteApi: HttpApi? = (mode as? ServerMode.Remote)?.let {
-        HttpApi(baseUrl = it.baseUrl, token = it.token)
+    @Volatile private var remoteApi: HttpApi? = null
+
+    init {
+        // Static remote mode (tests, live smoke): token fixed at construction.
+        if (mode is ServerMode.Remote) {
+            remoteApi = HttpApi(mode.baseUrl, mode.token)
+        } else {
+            // Enrolled mode: follow the enrollment state machine.
+            scope.launch {
+                enrollment.state.collect { state ->
+                    remoteApi = if (state is EnrollmentManager.State.Active) {
+                        HttpApi(state.baseUrl, enrollment.tokenProvider())
+                    } else {
+                        null
+                    }
+                }
+            }
+            // Restore an already-active enrollment at boot (vault read is sync).
+            (enrollment.state.value as? EnrollmentManager.State.Active)?.let { active ->
+                remoteApi = HttpApi(active.baseUrl, enrollment.tokenProvider())
+            }
+        }
     }
 
     // ---- repositories (interfaces are the contract; mode picks the impl) ----
@@ -113,28 +151,30 @@ class AppContainer(
         notes = noteStore, idempotency = idempotency, nextId = { nextId("note") }, now = now,
     )
 
-    val chatRepository: ChatRepository = remoteApi?.let(::RemoteChatRepository) ?: fakeChats
-    val agentRepository: AgentRepository = remoteApi?.let(::RemoteAgentRepository) ?: fakeAgents
-    val taskRepository: TaskRepository = remoteApi?.let(::RemoteTaskRepository) ?: fakeTasks
-    val noteRepository: NoteRepository = remoteApi?.let(::RemoteNoteRepository) ?: fakeNotes
-    val organizationRepository: OrganizationRepository = remoteApi?.let(::RemoteOrganizationRepository)
+    val chatRepository: ChatRepository get() = remoteApi?.let(::RemoteChatRepository) ?: fakeChats
+    val agentRepository: AgentRepository get() = remoteApi?.let(::RemoteAgentRepository) ?: fakeAgents
+    val taskRepository: TaskRepository get() = remoteApi?.let(::RemoteTaskRepository) ?: fakeTasks
+    val noteRepository: NoteRepository get() = remoteApi?.let(::RemoteNoteRepository) ?: fakeNotes
+    val organizationRepository: OrganizationRepository get() = remoteApi?.let(::RemoteOrganizationRepository)
         ?: FakeOrganizationRepository(
             projects = projectStore, areas = areaStore,
         )
-    val inboxRepository: InboxRepository = remoteApi?.let(::RemoteInboxRepository)
+    val inboxRepository: InboxRepository get() = remoteApi?.let(::RemoteInboxRepository)
         ?: FakeInboxRepository(
             items = inboxStore, idempotency = idempotency,
         )
-    val todayRepository: TodayRepository = remoteApi?.let(::RemoteTodayRepository)
+    val todayRepository: TodayRepository get() = remoteApi?.let(::RemoteTodayRepository)
         ?: FakeTodayRepository(
             events = FakeData.calendarEvents,
             tasks = fakeTasks,
-            inbox = inboxRepository,
+            inbox = FakeInboxRepository(
+                items = inboxStore, idempotency = idempotency,
+            ),
             agents = fakeAgents,
             notes = fakeNotes,
             now = now,
         )
-    val captureRepository: CaptureRepository = remoteApi?.let(::RemoteCaptureRepository)
+    val captureRepository: CaptureRepository get() = remoteApi?.let(::RemoteCaptureRepository)
         ?: FakeCaptureRepository(
             tasks = fakeTasks,
             notes = fakeNotes,
@@ -145,7 +185,7 @@ class AppContainer(
         )
 
     private val lastSyncState = MutableStateFlow<Instant?>(null)
-    val syncRepository: SyncRepository = remoteApi?.let(::RemoteSyncRepository)
+    val syncRepository: SyncRepository get() = remoteApi?.let(::RemoteSyncRepository)
         ?: FakeSyncRepository(
             changeLog = changeLog, lastSync = lastSyncState, now = now,
         )

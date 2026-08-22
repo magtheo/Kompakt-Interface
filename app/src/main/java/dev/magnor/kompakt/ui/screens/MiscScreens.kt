@@ -13,12 +13,15 @@ import androidx.compose.ui.unit.dp
 import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.buttons.OutlinedButtonMMD
 import com.mudita.mmd.components.text.TextMMD
+import dev.magnor.kompakt.AppInfo
+import dev.magnor.kompakt.data.EnrollmentManager
 import dev.magnor.kompakt.domain.CaptureType
 import dev.magnor.kompakt.domain.ProtocolVerdict
 import dev.magnor.kompakt.ui.containerViewModel
 import dev.magnor.kompakt.ui.relativeTo
 import dev.magnor.kompakt.ui.viewmodels.CaptureViewModel
 import dev.magnor.kompakt.ui.viewmodels.DiagnosticsViewModel
+import dev.magnor.kompakt.ui.viewmodels.EnrollmentViewModel
 
 /**
  * Universal capture — propose → user confirms type → commit.
@@ -168,19 +171,92 @@ fun DiagnosticsScreen(
 }
 
 @Composable
-fun SettingsScreen(onOpenDiagnostics: () -> Unit, onBack: () -> Unit) {
+fun SettingsScreen(
+    onOpenDiagnostics: () -> Unit,
+    onBack: () -> Unit,
+    viewModel: EnrollmentViewModel = containerViewModel {
+        EnrollmentViewModel(it.enrollment)
+    },
+) {
+    val ui by viewModel.ui.collectAsState()
+    val enrollment by viewModel.enrollmentState.collectAsState()
+
     AppScreen(title = "Settings", onBack = onBack) {
         SectionLabel("Device")
-        ListRow(title = "Enrollment", subtitle = "Not enrolled — Phase 4")
-        ListRow(title = "Server", subtitle = "dev-server:8650 (placeholder — Phase 4)")
-        ListRow(title = "Protocol", subtitle = "Client v1 · minimum server v1")
+        when (val e = enrollment) {
+            is EnrollmentManager.State.NotEnrolled -> {
+                ListRow(title = "Status", subtitle = "Not enrolled")
+                OutlinedTextField(
+                    value = ui.serverUrl,
+                    onValueChange = viewModel::onServerUrlChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { TextMMD("Server address") },
+                    singleLine = true,
+                    enabled = !ui.busy,
+                )
+                OutlinedTextField(
+                    value = ui.deviceName,
+                    onValueChange = viewModel::onDeviceNameChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    label = { TextMMD("Device name") },
+                    singleLine = true,
+                    enabled = !ui.busy,
+                )
+                ButtonMMD(
+                    onClick = viewModel::requestEnrollment,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    enabled = ui.canRequest,
+                ) { TextMMD(if (ui.busy) "Requesting…" else "Request enrollment") }
+            }
+
+            is EnrollmentManager.State.AwaitingApproval -> {
+                ListRow(title = "Status", subtitle = "Waiting for approval")
+                ListRow(title = "Device", subtitle = e.name)
+                ListRow(title = "Server", subtitle = e.baseUrl)
+                ListRow(title = "Device ID", subtitle = e.deviceId)
+                ButtonMMD(
+                    onClick = viewModel::poll,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    enabled = !ui.busy,
+                ) { TextMMD(if (ui.busy) "Checking…" else "Check again") }
+                OutlinedButtonMMD(
+                    onClick = viewModel::forget,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                ) { TextMMD("Forget this device") }
+            }
+
+            is EnrollmentManager.State.Active -> {
+                ListRow(title = "Status", subtitle = "Active — live data")
+                ListRow(title = "Device", subtitle = e.name)
+                ListRow(title = "Server", subtitle = e.baseUrl)
+                ListRow(title = "Capabilities", subtitle = e.capabilities.joinToString(", ").ifEmpty { "reads" })
+                OutlinedButtonMMD(
+                    onClick = viewModel::forget,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                ) { TextMMD("Forget this device") }
+            }
+        }
+        ui.message?.let { ListRow(title = it) }
+
+        SectionLabel("Protocol")
+        ListRow(title = "Client", subtitle = "v${AppInfo.APP_PROTOCOL} · minimum server v${AppInfo.MINIMUM_SERVER_PROTOCOL}")
 
         SectionLabel("Sync")
         ListRow(title = "Mode", subtitle = "Manual — Phase 9/10 add push + periodic")
 
         SectionLabel("About")
         ListRow(title = "Diagnostics", onClick = onOpenDiagnostics)
-        ListRow(title = "Version", subtitle = "0.2.0-dev (Phase 2 — domain model)")
-        ListRow(title = "Data", subtitle = "In-memory fakes — server lands in Phase 3+")
+        ListRow(title = "Version", subtitle = "0.3.0-dev (Phase 4 — enrollment)")
+        ListRow(title = "Data", subtitle = "Fakes until enrolled, then live /v1/")
     }
 }

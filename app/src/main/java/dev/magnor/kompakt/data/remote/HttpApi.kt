@@ -35,12 +35,16 @@ import java.util.concurrent.TimeUnit
  * - unknown JSON fields are ignored (KompaktJson),
  * - 401 → UnauthorizedException (re-enroll), 409 → RevisionConflictException,
  * - 5xx → ServerUnavailableException, transport failure → OfflineException.
+ *
+ * The bearer comes from a provider function so enrollment can rotate
+ * the token without rebuilding the stack (Phase 4).
  */
 class HttpApi(
     baseUrl: String,
-    private val token: String,
+    private val tokenProvider: () -> String?,
     private val client: OkHttpClient = defaultClient(),
 ) {
+    constructor(baseUrl: String, token: String) : this(baseUrl, { token })
 
     val base: HttpUrl = baseUrl.toHttpUrlOrNull()
         ?: throw IllegalArgumentException("invalid server URL: $baseUrl")
@@ -87,10 +91,10 @@ class HttpApi(
     }
 
     private suspend fun execute(request: Request): String = withContext(Dispatchers.IO) {
-        val tagged = request.newBuilder()
-            .header("Authorization", "Bearer $token")
+        val builder = request.newBuilder()
             .header("Accept", "application/json")
-            .build()
+        tokenProvider()?.let { builder.header("Authorization", "Bearer $it") }
+        val tagged = builder.build()
         val response: Response = try {
             client.newCall(tagged).execute()
         } catch (e: IOException) {
