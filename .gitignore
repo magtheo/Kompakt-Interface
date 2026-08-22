@@ -1,0 +1,18 @@
+# OS / editor noise
+.DS_Store
+*.swp
+*~
+
+# Local env — never commit
+.env
+.env.*
+
+# Android (added properly in Phase 0; keep basics now)
+*.apk
+*.keystore
+!debug.keystore
+
+# Kotlin/Gradle build output
+.gradle/
+build/
+local.properties

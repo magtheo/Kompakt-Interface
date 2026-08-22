@@ -1,0 +1,810 @@
+# User Experience
+
+## Purpose
+
+This document defines the intended user experience for the Mudita Kompakt personal interface.
+
+The UX should be designed for:
+
+- a small E-Ink display,
+- short interactions,
+- voice-first input,
+- low cognitive load,
+- low distraction,
+- minimal visual motion,
+- and a server that performs most of the complex work.
+
+The user should rarely need to browse, type long text, or navigate deep hierarchies.
+
+---
+
+## UX Goal
+
+The app should feel like:
+
+> A calm personal control panel that shows what matters, lets the user capture intent, and delegates complexity to the server.
+
+It should not feel like:
+
+- a desktop shrunk onto a phone,
+- a conventional Android productivity suite,
+- a chat application pretending to be everything,
+- or an animated dashboard.
+
+---
+
+## Core Interaction Modes
+
+The interface has several distinct modes.
+
+### Today
+
+Purpose:
+
+> Orient me.
+
+Shows what matters now.
+
+---
+
+### Chat
+
+Purpose:
+
+> Let me think, ask, explore, or discuss.
+
+A normal conversational interface with multiple chat threads.
+
+---
+
+### Agents
+
+Purpose:
+
+> Show me what my autonomous workers are doing.
+
+Focused on status, runs, results, and intervention.
+
+---
+
+### Tasks
+
+Purpose:
+
+> Show me what I need to do.
+
+Structured commitments.
+
+---
+
+### Notes
+
+Purpose:
+
+> Let me capture and retrieve information.
+
+Persistent thoughts and information.
+
+---
+
+### Inbox
+
+Purpose:
+
+> Show me what needs my attention.
+
+Aggregated from multiple domains.
+
+---
+
+## Navigation
+
+Preferred top-level navigation:
+
+```text
+Today | Chat | Agents | More
+```
+
+`More` opens:
+
+```text
+Tasks
+Notes
+Projects
+Inbox
+Settings
+```
+
+This keeps the highest-frequency modes directly accessible while limiting persistent navigation clutter.
+
+An alternative five-item navigation may be considered later if real-device testing shows it works better.
+
+---
+
+## Today Screen
+
+Today should be the default opening screen.
+
+It is an overview, not a management surface.
+
+Example:
+
+```text
+┌────────────────────────────┐
+│ SAT 22 AUG                 │
+├────────────────────────────┤
+│ NEXT                       │
+│ 12:30 Dentist              │
+├────────────────────────────┤
+│ TASKS                      │
+│ ○ Review PR                │
+│ ○ Buy groceries            │
+│ ✓ Workout                  │
+├────────────────────────────┤
+│ NEEDS ATTENTION            │
+│ ● Agent needs approval     │
+│ ● 1 overdue task           │
+├────────────────────────────┤
+│ AGENTS                     │
+│ ● Research running         │
+│ ✓ Audit complete           │
+├────────────────────────────┤
+│       🎙 CAPTURE            │
+└────────────────────────────┘
+```
+
+### Rules
+
+- show only a small number of high-value items,
+- avoid long lists,
+- use "See all" when needed,
+- prioritize the next event and current obligations,
+- avoid decorative widgets,
+- do not make Today itself editable beyond simple quick actions.
+
+---
+
+## Chat UX
+
+Chat should feel familiar and simple.
+
+### Chat list
+
+```text
+CHATS
+
+General
+Kodeverket
+Linux
+Travel research
+Temporary chat
+
+[New chat]
+```
+
+Each row may show:
+
+- title,
+- last activity,
+- optional project label.
+
+Avoid dense previews.
+
+---
+
+### Chat thread
+
+```text
+GENERAL
+
+You
+How does X compare with Y?
+
+Assistant
+...
+
+You
+And what about...
+
+────────────────────────────
+[ message field           ]
+[ 🎙 ]
+```
+
+### Chat principles
+
+- multiple persistent threads,
+- chat remains separate from tasks and notes,
+- no silent conversion into structured objects,
+- explicit actions may include:
+  - Save as note,
+  - Create task,
+  - Send to agent,
+  - Attach to project.
+
+Long responses should be summarized or paged appropriately for E-Ink.
+
+---
+
+## Agent UX
+
+Agents should not look like chat contacts.
+
+They represent workers and processes.
+
+### Agent list
+
+```text
+AGENTS
+
+● Project Coordinator
+  Running
+
+○ Job Search
+  Idle
+
+! Research Agent
+  Needs input
+
+RECENT RUNS
+
+✓ PR #55 audit
+● Course research
+```
+
+Use clear static status markers.
+
+Avoid animated spinners.
+
+Possible statuses:
+
+- Idle
+- Running
+- Waiting
+- Needs input
+- Completed
+- Failed
+
+---
+
+### Agent detail
+
+```text
+PROJECT COORDINATOR
+
+Status
+Running
+
+Current objective
+Check cross-spec drift
+
+Latest activity
+Comparing semantic model
+
+[Message agent]
+[Stop]
+[Recent runs]
+```
+
+---
+
+### Agent run detail
+
+```text
+PR #55 AUDIT
+
+Status
+Completed
+
+Result
+3 findings...
+
+[Open result]
+[Discuss]
+[Create task]
+[Archive]
+```
+
+"Discuss" may open a chat seeded with relevant context.
+
+---
+
+## Task UX
+
+Task lists should remain compact.
+
+### Task list
+
+```text
+TASKS
+
+TODAY
+
+○ Review PR
+○ Call dentist
+○ Buy food
+
+UPCOMING
+
+○ Submit application
+○ Read chapter
+```
+
+### Task detail
+
+```text
+REVIEW PR
+
+Project
+Kodeverket
+
+Due
+Today
+
+Notes
+Agent review available.
+
+[Complete]
+[Postpone]
+[Ask agent]
+[More]
+```
+
+### Task principles
+
+- one-tap completion,
+- fast postpone,
+- clear due state,
+- avoid excessive metadata,
+- project context visible but secondary,
+- agent-related actions explicit.
+
+---
+
+## Notes UX
+
+Notes should optimize for capture.
+
+### Notes list
+
+```text
+NOTES
+
+Idea about agent UI
+Philosophy thought
+Kodeverket pricing
+Shopping idea
+```
+
+### Note detail/editor
+
+```text
+NOTE
+
+I think the agent interface should...
+
+[Save]
+```
+
+### Notes principles
+
+- very low capture friction,
+- organization optional,
+- full-screen text entry is acceptable,
+- project association can happen later,
+- server may suggest classification but not force it.
+
+---
+
+## Universal Capture
+
+Universal capture should be available from the main surfaces.
+
+Possible first screen:
+
+```text
+CAPTURE
+
+🎙 Speak
+
+or
+
+[Type]
+
+Save as:
+
+[Note] [Task] [Chat] [Agent]
+```
+
+A more advanced flow may allow the server to infer intent:
+
+```text
+"I need to remember to call the dentist tomorrow."
+
+Suggested:
+
+TASK
+Call dentist
+Tomorrow
+
+[Confirm]
+[Change]
+```
+
+The system must not silently create structured objects without confirmation.
+
+---
+
+## Inbox UX
+
+Inbox aggregates attention.
+
+Example:
+
+```text
+INBOX
+
+! Agent needs approval
+  Kodeverket audit
+
+✓ Agent finished
+  Summer course research
+
+! Task overdue
+  Call dentist
+
+! Server warning
+  Backup failed
+```
+
+Selecting an item opens the real source object.
+
+Inbox should support:
+
+- open,
+- archive/dismiss where appropriate,
+- simple approval,
+- simple rejection,
+- postpone when relevant.
+
+Inbox should not become a second task system.
+
+---
+
+## Project UX
+
+Projects should be compact projections rather than desktop dashboards.
+
+Example:
+
+```text
+KODEVERKET
+
+Current goal
+Prepare next release
+
+Next action
+Review PR #55
+
+Agents
+● Audit running
+
+Needs attention
+1 item
+
+Recent
+PR created
+Tests fixed
+```
+
+Projects mainly provide context and navigation.
+
+---
+
+## Cross-Domain Actions
+
+The domains remain separate but connected.
+
+Supported explicit transitions may include:
+
+```text
+Chat → Save as note
+Chat → Create task
+Chat → Send to agent
+
+Agent result → Discuss in chat
+Agent result → Create task
+Agent result → Save as note
+
+Task → Ask agent
+Task → Open project
+
+Note → Discuss in chat
+Note → Create task
+```
+
+These transitions should always be visible.
+
+---
+
+## E-Ink UX Rules
+
+### No animation by default
+
+Avoid:
+
+- slide transitions,
+- fades,
+- animated loaders,
+- ripples,
+- pulsing indicators,
+- animated progress bars.
+
+Prefer:
+
+- instant page replacement,
+- static status text,
+- static symbols,
+- manual refresh when appropriate.
+
+---
+
+### Limit redraws
+
+Do not constantly update:
+
+- timers,
+- live clocks,
+- token streams,
+- progress percentages.
+
+For running agents, prefer:
+
+```text
+Running
+Last update: 2 min ago
+[Refresh]
+```
+
+rather than a continuously changing UI.
+
+If streaming chat is implemented, consider batching updates rather than redrawing for every token.
+
+---
+
+### High contrast
+
+Prefer:
+
+- black,
+- white,
+- clear borders,
+- typography hierarchy,
+- spacing,
+- icon shape.
+
+Do not depend on color to communicate status.
+
+---
+
+### Large touch targets
+
+The display is small, but interactions should remain forgiving.
+
+Prioritize:
+
+- large rows,
+- full-row tap targets,
+- few small icons,
+- explicit labeled actions.
+
+---
+
+### Short navigation depth
+
+Common actions should be reachable in:
+
+- 0–2 taps from Today,
+- or one voice/capture action.
+
+Avoid deep settings-style hierarchies.
+
+---
+
+## Voice UX
+
+Voice is expected to be the primary text-entry method.
+
+Ideal sequence:
+
+1. tap microphone,
+2. speak,
+3. transcription appears,
+4. correct one or two words,
+5. submit.
+
+The user should not be forced into a separate "voice assistant" mode.
+
+Voice should simply be a fast way to fill:
+
+- chat,
+- note,
+- task,
+- agent request.
+
+---
+
+## Chat Response Presentation
+
+Long LLM responses should be adapted to E-Ink.
+
+Prefer:
+
+- concise answer first,
+- bullets,
+- optional "More",
+- clear sections,
+- small number of actionable buttons.
+
+Example:
+
+```text
+RESEARCH COMPLETE
+
+Bottom line
+Fedora 44 supports X, but Y remains limited.
+
+Key points
+• ...
+• ...
+• ...
+
+[More]
+[Ask follow-up]
+[Save note]
+```
+
+Do not dump large markdown-heavy documents into a tiny scrolling surface unless the user explicitly opens a detailed view.
+
+---
+
+## Notifications
+
+Notifications should be rare and meaningful.
+
+Good candidates:
+
+- task due,
+- important reminder,
+- agent needs input,
+- agent completed when the result matters,
+- server warning,
+- important project blocker.
+
+Avoid:
+
+- routine background progress,
+- every agent log message,
+- passive informational noise.
+
+The notification philosophy should be:
+
+> Interrupt only when there is a reason for the user to act or know now.
+
+---
+
+## Offline UX
+
+When offline:
+
+- Today may show cached content,
+- tasks can be completed locally,
+- notes can be created,
+- chat/agent requests can be queued,
+- the UI must clearly indicate queued state.
+
+Example:
+
+```text
+Queued — will send when online
+```
+
+Avoid blocking basic capture because connectivity is unavailable.
+
+---
+
+## Error UX
+
+Errors should be actionable and calm.
+
+Bad:
+
+```text
+HTTP 502
+```
+
+Better:
+
+```text
+Server unavailable
+
+Your note was saved locally.
+It will sync automatically.
+
+[Retry]
+```
+
+For authentication failure:
+
+```text
+This device is no longer authorized.
+
+[Re-enroll]
+```
+
+---
+
+## First Version UX Scope
+
+The first coherent version should support:
+
+### Today
+- next event,
+- today tasks,
+- attention items,
+- agent status,
+- capture.
+
+### Chat
+- chat list,
+- create chat,
+- open thread,
+- send message.
+
+### Agents
+- list agents,
+- list recent runs,
+- inspect run,
+- simple actions.
+
+### Tasks
+- list,
+- complete,
+- postpone,
+- detail.
+
+### Notes
+- list,
+- create,
+- edit.
+
+### Inbox
+- list,
+- open source item,
+- basic decision actions.
+
+### Shared
+- capture,
+- item detail,
+- settings,
+- offline/connection state.
+
+---
+
+## UX Questions Still Open
+
+To validate on real hardware:
+
+- exact typography sizes,
+- exact bottom-navigation layout,
+- whether four top-level destinations fit comfortably,
+- best jump-scroll step,
+- whether chat needs pagination,
+- whether server responses should be aggressively summarized,
+- how much Today can show before it becomes crowded,
+- whether physical buttons can or should be mapped,
+- how notifications behave on MuditaOS K,
+- whether the universal capture control should be persistent or screen-specific.
+
+These should be answered through real-device use rather than speculation.
+

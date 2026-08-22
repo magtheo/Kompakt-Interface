@@ -1,0 +1,482 @@
+# Decisions Register
+
+## Purpose
+
+This document records product and architecture decisions that have landed for the Mudita Kompakt personal interface.
+
+Its purpose is to prevent design drift during implementation, especially when coding agents work on the project over time.
+
+Each decision has an ID and status.
+
+Statuses:
+
+- **Accepted** — current source-of-truth decision.
+- **Proposed** — preferred direction but not yet fully landed.
+- **Superseded** — replaced by a later decision.
+- **Deferred** — intentionally not decided for v0.1.
+
+---
+
+## D001 — Server is authoritative
+
+**Status:** Accepted
+
+The server is the authoritative source of truth for tasks, notes, chats, agents, agent runs, projects, areas, inbox items, relationships, and durable user state.
+
+The phone may keep a small cache and an offline mutation queue, but must not become a parallel source of truth.
+
+### Consequences
+
+- replacing the phone does not lose important data,
+- sync remains server-centered,
+- the client must tolerate stale cache,
+- writes must flow through server APIs,
+- object revisions and incremental sync are required.
+
+---
+
+## D002 — The APK is open source
+
+**Status:** Accepted
+
+The Android client will be open source.
+
+Security must not depend on hidden source code, hidden endpoints, hidden request formats, or obscured client-side rules.
+
+### Consequences
+
+- no secrets may be embedded in the APK or repository,
+- modified APKs must not gain extra authority,
+- API authorization must be server-enforced,
+- release signing and supply-chain security matter.
+
+---
+
+## D003 — Chat, Agents, Tasks, and Notes remain distinct
+
+**Status:** Accepted
+
+The following remain separate concepts:
+
+- Chat
+- Agents
+- Tasks
+- Notes
+
+They may reference one another, but must not silently become one another.
+
+Allowed explicit transitions include:
+
+- Chat → Save as note
+- Chat → Create task
+- Chat → Send to agent
+- Agent result → Discuss in chat
+- Agent result → Create task
+- Task → Ask agent
+- Note → Discuss in chat
+
+---
+
+## D004 — Organize follows the vault
+
+**Status:** Accepted
+
+The app must not invent an independent organizational hierarchy.
+
+The **Organize** surface renders the server/vault entity model through the coordinator.
+
+```text
+Organize
+├── Projects
+├── Areas
+├── Tasks
+└── Notes
+```
+
+The server-side vault already defines:
+
+- **Projects** — project folders such as Evershift or KodeVerket,
+- **Areas** — long-lived areas such as Health, Career, Personal, Economy,
+- **Tasks** — aggregated from adapters and linked through relationships,
+- **Notes** — markdown files in the vault.
+
+Projects and Areas are the primary browse axes. Tasks and Notes may be shown as flat lists filterable by project or area.
+
+Adding or changing structure in the vault should flow through the coordinator into the app automatically.
+
+---
+
+## D005 — Phone note writes use capture routing
+
+**Status:** Accepted for v0.1
+
+Free-form editing of the full note vault is not a v0.1 phone feature.
+
+Phone note creation goes through the capture flow:
+
+```text
+voice/text
+    ↓
+server proposes type/route
+    ↓
+user confirms
+    ↓
+server routes to vault destination
+```
+
+This preserves the existing **one capture = one item** model.
+
+Quick note capture and note browsing are supported. Full Obsidian-style editing remains a desktop workflow.
+
+---
+
+## D006 — v0.1 is single-user, multi-device
+
+**Status:** Accepted
+
+v0.1 supports one person, one server environment, and multiple enrolled devices.
+
+```text
+user
+├── kompakt-01
+├── pixel-01
+└── laptop-01
+```
+
+Explicitly out of scope:
+
+- organizations,
+- teams,
+- invitations,
+- multi-tenant isolation,
+- user-to-user permissions,
+- general RBAC for multiple users.
+
+Authorization is primarily about device identity, device trust class, and operation capability.
+
+---
+
+## D007 — Devices have trust tiers
+
+**Status:** Accepted
+
+Different devices may have different capability levels.
+
+### Low trust
+
+Example: Mudita Kompakt.
+
+Typical capabilities:
+
+- read personal summaries,
+- capture,
+- chat,
+- notes/tasks,
+- inspect agents,
+- low-risk agent actions.
+
+### Medium trust
+
+Example: GrapheneOS / capability phone.
+
+May support more sensitive workflows.
+
+### Admin trust
+
+Example: trusted laptop/workstation.
+
+May authorize administrative operations, credential changes, privileged infrastructure work, and high-impact actions.
+
+---
+
+## D008 — Delivery is multi-path and transport-swappable
+
+**Status:** Accepted
+
+Server-to-phone delivery uses three conceptual mechanisms.
+
+### Foreground
+
+While the app is open:
+
+- live coordinator connection,
+- SSE or WebSocket implementation,
+- near-immediate Today/Inbox/agent updates.
+
+### Background
+
+When the app is not foregrounded:
+
+- ntfy-based push,
+- authenticated per-device topics,
+- deep-link/event payload,
+- periodic WorkManager sync fallback,
+- missed events recovered through incremental sync.
+
+### Local
+
+For events already known on-device:
+
+- AlarmManager,
+- local Android notification,
+- no network dependency.
+
+The app should expose a single internal update interface while transport remains replaceable.
+
+Real-device testing will determine final polling intervals and background behavior.
+
+---
+
+## D009 — Delivery semantics are independent of transport
+
+**Status:** Accepted
+
+The application defines the semantic contract first:
+
+> An event becomes available, the client eventually receives or recovers it, and missed events can be replayed through cursor-based sync.
+
+Foreground streaming, ntfy push, periodic sync, and later transports all feed the same update pipeline.
+
+---
+
+## D010 — API uses explicit protocol versioning and capability negotiation
+
+**Status:** Accepted
+
+The API uses versioned routes:
+
+```text
+/v1/...
+```
+
+A capabilities endpoint returns at least:
+
+```text
+server_protocol
+minimum_client_protocol
+feature flags
+```
+
+Example feature flags:
+
+```text
+agent_runs
+voice_capture
+projects
+areas
+offline_capture
+```
+
+The client:
+
+- hard-stops if below `minimum_client_protocol`,
+- hides or gates unsupported features,
+- ignores unknown optional fields,
+- handles unknown enum/action values safely,
+- must not crash on forward-compatible additions.
+
+The server does not rename or remove existing fields incompatibly within a version. Breaking behavior requires a new version and migration window where practical.
+
+### Endpoint naming note
+
+Earlier discussion referenced both:
+
+```text
+/v1/system/capabilities
+```
+
+and:
+
+```text
+/v1/capabilities
+```
+
+The exact canonical path should be chosen once during implementation and then treated as stable.
+
+---
+
+## D011 — Incremental sync uses revisions and cursors
+
+**Status:** Accepted
+
+Every synchronizable object should expose at least:
+
+```text
+id
+revision
+updated_at
+```
+
+Deletions should be represented through tombstones or equivalent change records.
+
+The client pulls incremental changes using a cursor-based endpoint such as:
+
+```text
+GET /v1/changes?since=<cursor>
+```
+
+Writes against existing objects should include an expected revision.
+
+If stale, the server returns `409 Conflict` with current state available to the client.
+
+No CRDT or complex merge engine is required for v0.1.
+
+---
+
+## D012 — v0.1 offline writes are capture-oriented
+
+**Status:** Accepted
+
+Offline queueing in v0.1 is limited to safe capture-style operations.
+
+Allowed examples:
+
+- create task,
+- create note,
+- create capture,
+- low-risk agent request if explicitly supported.
+
+Not required offline in v0.1:
+
+- full chat interaction,
+- live agent runs,
+- arbitrary object editing,
+- complex conflict resolution.
+
+---
+
+## D013 — Mutations use idempotency keys
+
+**Status:** Accepted
+
+Replayable mutations use a stable request identifier / idempotency key.
+
+The existing coordinator pattern using `request_id` for scheduled mutations should be reused conceptually.
+
+A queued capture can therefore be retried after reconnect without creating duplicate objects.
+
+---
+
+## D014 — Conflict policy is intentionally simple
+
+**Status:** Accepted for v0.1
+
+On revision conflict:
+
+1. server returns `409`,
+2. client refetches current state,
+3. client reconciles with a simple rule,
+4. no dedicated merge UI is required.
+
+Where a final resolution policy is needed, use a simple object-specific or server-defined last-write-wins approach.
+
+Single-user use makes simultaneous edits uncommon.
+
+---
+
+## D015 — KompaktCalendar is a reference implementation
+
+**Status:** Accepted
+
+Use `davidanderlohr/KompaktCalendar` primarily as reference material for:
+
+- Mudita-compatible Gradle/Compose setup,
+- MMD usage,
+- E-Ink navigation,
+- scrolling,
+- notifications,
+- Android integration.
+
+Do not copy substantial GPLv3 implementation code unless the project intentionally adopts compatible licensing obligations.
+
+---
+
+## D016 — Mudita MMD is the E-Ink UI foundation
+
+**Status:** Accepted
+
+Use Mudita MMD as the primary E-Ink-aware design/component foundation.
+
+Do not recreate basic E-Ink interaction primitives unnecessarily.
+
+---
+
+## D017 — E-Ink behavior is a product constraint, not a later optimization
+
+**Status:** Accepted
+
+From the first build:
+
+- no animated navigation,
+- no ripple effects,
+- no decorative motion,
+- low redraw frequency,
+- high contrast,
+- static status indicators,
+- discrete/jump scrolling where appropriate.
+
+Development on OLED must still respect these constraints.
+
+---
+
+## D018 — Today and Inbox are projections, not stores
+
+**Status:** Accepted
+
+Today and Inbox aggregate objects from other domains and do not own canonical copies.
+
+Selecting an item opens the underlying source object.
+
+---
+
+## D019 — Security is server-enforced
+
+**Status:** Accepted
+
+The server must never trust:
+
+- client UI state,
+- hidden buttons,
+- app package identity alone,
+- client-side capability flags,
+- the fact that a request came from the official APK.
+
+Each meaningful operation is authenticated and authorized server-side.
+
+---
+
+## D020 — No powerful secrets live on the Kompakt
+
+**Status:** Accepted
+
+Do not store on the Kompakt:
+
+- password vaults,
+- recovery codes,
+- root SSH keys,
+- server master credentials,
+- broad API tokens,
+- database credentials,
+- administrative secrets.
+
+The device receives only revocable, narrow credentials appropriate to its trust tier.
+
+---
+
+## Deferred Decisions
+
+The following remain intentionally open:
+
+- exact canonical capabilities endpoint path,
+- SSE vs WebSocket for foreground transport,
+- final WorkManager fallback interval,
+- exact ntfy topic/payload format,
+- whether server-side STT is enabled in v0.1,
+- exact APK update mechanism,
+- physical-button integration,
+- exact calendar data integration,
+- exact cache retention durations,
+- whether Class 4 actions may ever be approved from Kompakt,
+- final open-source license for the app repository.
+
+These should be resolved through implementation or real-device testing.
