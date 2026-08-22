@@ -9,9 +9,10 @@ import dev.magnor.kompakt.ui.theme.KompaktTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val container = (application as KompaktApplication).container
         setContent {
             KompaktTheme {
-                KompaktApp()
+                KompaktApp(container)
             }
         }
     }

@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
@@ -18,6 +19,7 @@ import com.mudita.mmd.components.buttons.FloatingActionButtonMMD
 import com.mudita.mmd.components.nav_bar.NavigationBarMMD
 import com.mudita.mmd.components.nav_bar.NavigationBarItemMMD
 import com.mudita.mmd.components.text.TextMMD
+import dev.magnor.kompakt.data.AppContainer
 import dev.magnor.kompakt.ui.navigation.Routes
 import dev.magnor.kompakt.ui.navigation.TopLevelDestination
 import dev.magnor.kompakt.ui.screens.AgentDetailScreen
@@ -43,7 +45,14 @@ import dev.magnor.kompakt.ui.screens.TodayScreen
  * E-Ink rule: navigation transitions disabled (docs/development-plan.md Phase 1).
  */
 @Composable
-fun KompaktApp() {
+fun KompaktApp(container: AppContainer) {
+    CompositionLocalProvider(LocalAppContainer provides container) {
+        KompaktNavHost()
+    }
+}
+
+@Composable
+private fun KompaktNavHost() {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -103,8 +112,11 @@ fun KompaktApp() {
                     onOpenThread = { navController.navigate(Routes.chatThread(it)) },
                 )
             }
-            composable(Routes.CHAT_THREAD) {
-                ChatThreadScreen(onBack = { navController.popBackStack() })
+            composable(Routes.CHAT_THREAD) { entry ->
+                ChatThreadScreen(
+                    threadId = entry.arguments?.getString("threadId").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                )
             }
             composable(Routes.AGENTS_LIST) {
                 AgentsListScreen(
@@ -112,16 +124,22 @@ fun KompaktApp() {
                     onOpenInbox = { navController.navigate(Routes.INBOX) },
                 )
             }
-            composable(Routes.AGENT_DETAIL) {
+            composable(Routes.AGENT_DETAIL) { entry ->
+                val agentId = entry.arguments?.getString("agentId").orEmpty()
                 AgentDetailScreen(
+                    agentId = agentId,
                     onOpenRun = { runId ->
-                        navController.navigate(Routes.agentRun("1", runId))
+                        navController.navigate(Routes.agentRun(agentId, runId))
                     },
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable(Routes.AGENT_RUN_DETAIL) {
-                AgentRunDetailScreen(onBack = { navController.popBackStack() })
+            composable(Routes.AGENT_RUN_DETAIL) { entry ->
+                AgentRunDetailScreen(
+                    agentId = entry.arguments?.getString("agentId").orEmpty(),
+                    runId = entry.arguments?.getString("runId").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                )
             }
             composable(Routes.MORE) {
                 MoreScreen(
@@ -162,8 +180,11 @@ fun KompaktApp() {
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable(Routes.ITEM_DETAIL) {
-                ItemDetailScreen(onBack = { navController.popBackStack() })
+            composable(Routes.ITEM_DETAIL) { entry ->
+                ItemDetailScreen(
+                    itemId = entry.arguments?.getString("itemId").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                )
             }
             composable(Routes.CAPTURE) {
                 CaptureScreen(

@@ -1,36 +1,68 @@
 package dev.magnor.kompakt.ui.screens
 
 import androidx.compose.runtime.Composable
-import dev.magnor.kompakt.data.MockData
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import dev.magnor.kompakt.domain.EntityId
+import dev.magnor.kompakt.domain.MessageRole
+import dev.magnor.kompakt.domain.MessageStatus
+import dev.magnor.kompakt.ui.containerViewModel
+import dev.magnor.kompakt.ui.relativeTo
+import dev.magnor.kompakt.ui.viewmodels.ChatListViewModel
+import dev.magnor.kompakt.ui.viewmodels.ChatThreadViewModel
 
 /** Chat list — conversations are distinct from agents and tasks (D003). */
 @Composable
-fun ChatListScreen(onOpenThread: (String) -> Unit) {
+fun ChatListScreen(
+    onOpenThread: (EntityId) -> Unit,
+    viewModel: ChatListViewModel = containerViewModel { ChatListViewModel(it.chatRepository, it.now()) },
+) {
+    val threads by viewModel.threads.collectAsState()
+
     AppScreen(title = "Chats") {
-        MockData.chatThreads.forEachIndexed { index, (title, snippet, time) ->
-            ListRow(
-                title = title,
-                subtitle = snippet,
-                trailing = time,
-                onClick = { onOpenThread("thread-${index + 1}") },
-            )
+        if (threads.isEmpty()) {
+            ListRow(title = "No chats yet", subtitle = "Create one via Capture")
+        } else {
+            threads.forEach { thread ->
+                ListRow(
+                    title = thread.title,
+                    subtitle = thread.lastMessagePreview,
+                    trailing = thread.updatedAt.relativeTo(viewModel.now),
+                    onClick = { onOpenThread(thread.id) },
+                )
+            }
         }
     }
 }
 
-/** Chat thread — placeholder conversation with mocked messages. */
+/** Chat thread — renders the server-side conversation for this device. */
 @Composable
-fun ChatThreadScreen(onBack: () -> Unit) {
-    AppScreen(title = "General", onBack = onBack) {
-        MockData.chatMessages.forEach { (author, text) ->
-            CardMMDRow(author = author, text = text)
+fun ChatThreadScreen(
+    threadId: EntityId,
+    onBack: () -> Unit,
+    viewModel: ChatThreadViewModel = containerViewModel(key = "chat-$threadId") {
+        ChatThreadViewModel(it.chatRepository, threadId)
+    },
+) {
+    val thread by viewModel.thread.collectAsState()
+    val messages by viewModel.messages.collectAsState()
+
+    AppScreen(title = thread?.title ?: "Chat", onBack = onBack) {
+        messages.forEach { message ->
+            ListRow(
+                title = if (message.role == MessageRole.USER) "You" else "Assistant",
+                subtitle = message.content,
+                trailing = when (message.status) {
+                    MessageStatus.PENDING -> "…"
+                    MessageStatus.FAILED -> "!"
+                    else -> null
+                },
+            )
+        }
+        if (messages.isEmpty()) {
+            ListRow(title = "No messages", subtitle = "Say something in Phase 7")
         }
         SectionLabel("Reply")
         ListRow(title = "Text input arrives in Phase 7 (Chat)", subtitle = "Placeholder")
     }
-}
-
-@Composable
-private fun CardMMDRow(author: String, text: String) {
-    ListRow(title = author, subtitle = text)
 }
