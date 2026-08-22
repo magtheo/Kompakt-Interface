@@ -951,10 +951,14 @@ The server rejects actions based on policy even if the Android client is deliber
 
 ## Goal
 
-Make the repository usable and safe for outside users.
+Make the system usable and safe for outside users — as three separate artifacts
+per `distribution.md` (D023): the extracted `kompakt-protocol` spec repository,
+this client, and the vault-coordinator reference server.
 
 ## Add / finalize
 
+- extraction of the `/v1/` protocol spec into the `kompakt-protocol` repository (D023 — keystone, first),
+- `/v1/` vault-leakage audit (no storage paths, PARA names, or vault conventions on the wire — see `distribution.md` §Binding protocol rules),
 - README,
 - architecture overview,
 - build instructions,

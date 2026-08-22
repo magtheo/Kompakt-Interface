@@ -7,7 +7,7 @@ Guidance for autonomous coding agents working on this repository.
 Before writing code, read the docs in the order given in `README.md`.
 The decisions register (`docs/decisions.md`) is binding:
 
-- Do **not** redesign accepted decisions (D001–D020) during implementation.
+- Do **not** redesign accepted decisions (D001–D023) during implementation.
 - If you find a contradiction between docs, or believe a decision is wrong,
   **flag it** and record a new/updated decision — never silently replace
   architecture.

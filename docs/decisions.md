@@ -478,6 +478,75 @@ Resolves deferred items from this document and protocol §8:
 
 ---
 
+## D022 — Device enrollment and per-device tokens (T-005)
+
+**Status:** Accepted (Aug 2026, implementation)
+
+Resolves the Phase 4 security boundary. Wire and trust semantics:
+
+- **Dual principals.** Admin = the shared config token (full access, incl.
+  `/api/*`). Device = a per-device token minted at activation; valid only for
+  `/v1/*` reads scoped by capabilities (`task.read`, `project.read`,
+  `inbox.read`, `today.read`, `note.read`, …). Writes remain admin-only until
+  Phase 5+ action endpoints exist.
+- **Enrollment flow.** `POST /v1/devices/enroll {name, public_key}` → pending;
+  `GET /v1/devices/{id}/challenge` → nonce; `POST /v1/devices/{id}/activate
+  {nonce, signature}` verifies a raw Ed25519 signature over the nonce and
+  returns the device token exactly once. Server stores only a SHA-256 hash of
+  the token.
+- **Anti-enumeration.** Unknown device IDs on challenge receive a decoy nonce
+  (valid base64, unusable) — the endpoint does not reveal whether an ID exists.
+- **Approve defaults.** `trust_class=low`, capabilities unset → all Class-1
+  reads, per `security.md`.
+- **Revocation semantics.** Pending activate returns `202 {"status":"pending"}`
+  (poll, don't spin). Revoked devices keep their token hash so their requests
+  fail with an explicit `device_revoked` 401 instead of a bare 401 — the client
+  can guide re-enrollment instead of showing a generic auth error.
+
+Client side: device keypair is Ed25519 via BouncyCastle **lightweight API**
+(no JCE provider registration — Android ships a stripped BC namespace). The
+seed is wrapped at rest with AndroidKeyStore AES/GCM behind a `SecretVault`
+abstraction (JVM tests use an in-memory vault). `HttpApi` takes a token
+provider rather than a fixed token, and `AppContainer` flips repositories
+Fake→Remote when enrollment activates — no app restart.
+
+---
+
+## D023 — Three-artifact distribution: protocol spec, client, reference server
+
+**Status:** Accepted (Aug 2026, planning — executes at Phase 16)
+
+When the system goes public it ships as **three separate artifacts, not one
+repository**:
+
+- **kompakt-protocol** — standalone, independently versioned `/v1/` protocol
+  specification. The product boundary; what any third-party backend implements
+  (the "email model": any client, any server, shared spec).
+- **Kompakt-Interface** — the Android client (this repo).
+- **vault-coordinator** — reference server implementation, published with the
+  vault adapter isolated so it is swappable.
+
+Rationale: D021's contract-first architecture makes the boundary explicit; a
+monorepo would signal a private/internal API and re-couple the pieces the
+contract exists to separate. Audiences, release cadences, and versioning differ
+per artifact — `/v1/` versioning plus dual-sided contract tests already handle
+cross-cutting change, so atomic co-commits add nothing.
+
+Two rules follow:
+
+- **The wire is resource-shaped, never vault-shaped.** No storage paths, PARA
+  names, or vault frontmatter conventions may appear in `/v1/` traffic — this
+  is what makes third-party backends interchangeable. A leakage audit is a
+  Phase 16 gate item.
+- **Coordinator vault conventions must become configuration** before
+  third-party "bring your own vault" self-hosting is a supported path
+  (currently partly baked in).
+
+Detail: `distribution.md`. (D022 remains reserved for the T-005 enrollment
+record.)
+
+---
+
 ## Deferred Decisions
 
 The following remain intentionally open:

@@ -19,8 +19,9 @@ Read in this order:
 3. [`docs/technical-architecture.md`](docs/technical-architecture.md) — stack, client architecture, domain model
 4. [`docs/protocol-and-sync.md`](docs/protocol-and-sync.md) — delivery, versioning, capability negotiation, revisions/cursors, offline queue
 5. [`docs/security.md`](docs/security.md) — trust model, enrollment, device trust tiers, action risk classes
-6. [`docs/decisions.md`](docs/decisions.md) — decisions register (D001–D020); binding, do not redesign during implementation
+6. [`docs/decisions.md`](docs/decisions.md) — decisions register (D001–D023); binding, do not redesign during implementation
 7. [`docs/development-plan.md`](docs/development-plan.md) — phased implementation plan and v0.1 definition of done
+8. [`docs/distribution.md`](docs/distribution.md) — three-artifact distribution model, third-party adoption paths, protocol boundary rules (D023)
 
 ## First milestone
 
