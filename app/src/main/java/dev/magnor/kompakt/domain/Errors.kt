@@ -15,4 +15,16 @@ class RevisionConflictException(
 class CaptureRejectedException(val reason: String) :
     RepositoryException("capture rejected: $reason")
 
+/** 401: the device token is missing, revoked, or wrong — re-enrollment needed (protocol §16). */
+class UnauthorizedException :
+    RepositoryException("device not authorized — enrollment required")
+
+/** Transport-level failure: no route to server, timeout, DNS. UI offers retry. */
+class OfflineException(cause: Throwable) :
+    RepositoryException("offline: ${cause.message ?: cause::class.simpleName}")
+
+/** 5xx: the server is alive enough to answer but broken. UI offers retry. */
+class ServerUnavailableException(val code: Int) :
+    RepositoryException("server unavailable (HTTP $code)")
+
 open class RepositoryException(message: String) : Exception(message)

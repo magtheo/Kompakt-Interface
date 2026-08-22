@@ -463,11 +463,26 @@ The device receives only revocable, narrow credentials appropriate to its trust 
 
 ---
 
+## D021 — Canonical /v1/ wire contract (T-004)
+
+**Status:** Accepted (Aug 2026, implementation)
+
+Resolves deferred items from this document and protocol §8:
+
+- **Canonical capabilities path: `GET /v1/capabilities`** — the `/v1/system/capabilities` spelling in earlier drafts is retired.
+- **Wire field naming is snake_case** (`due_at`, `project_id`, `updated_at`), matching the protocol document's examples and the Python coordinator's natural output. The Kotlin domain keeps camelCase properties with `@SerialName` annotations bridging the two.
+- **HTTP transport: OkHttp 4.12** (already in the dependency set) with MockWebServer pinning the wire contract in unit tests. No Ktor/Retrofit — minimal dependency footprint for a thin client.
+- **List envelopes are keyed objects** (`{"tasks": [...]}`), tolerating unknown envelope fields (future pagination) per protocol §9.
+- **Feature flags tell the truth**: `chat`, `agents`, `agent_runs`, `notes`, `offline_capture` are `false` until their coordinator backends exist; endpoints serve shape-valid empty lists so clients exercise the decoding path.
+- **Auth**: `/v1/*` shares the coordinator's existing bearer-token middleware until device enrollment (Phase 4) replaces it with per-device tokens.
+
+---
+
 ## Deferred Decisions
 
 The following remain intentionally open:
 
-- exact canonical capabilities endpoint path,
+- exact canonical capabilities endpoint path ~~(D021: `GET /v1/capabilities`)~~,
 - SSE vs WebSocket for foreground transport,
 - final WorkManager fallback interval,
 - exact ntfy topic/payload format,

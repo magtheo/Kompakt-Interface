@@ -6,6 +6,7 @@ import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.serializers.InstantIso8601Serializer
 import kotlinx.datetime.serializers.LocalDateIso8601Serializer
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 
@@ -14,7 +15,9 @@ import kotlinx.serialization.UseSerializers
 data class CalendarEvent(
     val id: EntityId,
     val title: String,
+    @SerialName("start_at")
     val startAt: Instant,
+    @SerialName("end_at")
     val endAt: Instant? = null,
     val location: String? = null,
 )
@@ -30,6 +33,8 @@ data class TodayProjection(
     val events: List<CalendarEvent> = emptyList(),
     val tasks: List<Task> = emptyList(),
     val attention: List<InboxItem> = emptyList(),
+    @SerialName("agent_activity")
     val agentActivity: List<AgentRun> = emptyList(),
+    @SerialName("recent_note")
     val recentNote: Note? = null,
 )

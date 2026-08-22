@@ -4,6 +4,7 @@ package dev.magnor.kompakt.domain
 
 import kotlinx.datetime.Instant
 import kotlinx.datetime.serializers.InstantIso8601Serializer
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 
@@ -25,7 +26,9 @@ enum class InboxPriority(val wire: String) {
 @Serializable
 data class InboxItem(
     override val id: EntityId,
+    @SerialName("source_type")
     val sourceType: EntityKind? = null,
+    @SerialName("source_id")
     val sourceId: EntityId? = null,
     val title: String,
     val summary: String? = null,
@@ -33,5 +36,6 @@ data class InboxItem(
     val priority: InboxPriority = InboxPriority.NORMAL,
     val actions: List<Action> = emptyList(),
     override val revision: Long = 1,
+    @SerialName("updated_at")
     override val updatedAt: Instant = timestamp,
 ) : SyncEntity

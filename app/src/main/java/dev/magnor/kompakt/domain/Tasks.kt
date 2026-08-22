@@ -4,6 +4,7 @@ package dev.magnor.kompakt.domain
 
 import kotlinx.datetime.Instant
 import kotlinx.datetime.serializers.InstantIso8601Serializer
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 
@@ -21,15 +22,21 @@ data class Task(
     override val id: EntityId,
     val title: String,
     val status: TaskStatus = TaskStatus.OPEN,
+    @SerialName("due_at")
     val dueAt: Instant? = null,
+    @SerialName("project_id")
     val projectId: EntityId? = null,
+    @SerialName("area_id")
     val areaId: EntityId? = null,
     /** Free-text detail attached to the task. */
     val notes: String? = null,
     /** Explicit cross-object link (e.g. created from an agent run / chat). */
+    @SerialName("source_type")
     val sourceType: EntityKind? = null,
+    @SerialName("source_id")
     val sourceId: EntityId? = null,
     override val revision: Long = 1,
+    @SerialName("updated_at")
     override val updatedAt: Instant,
 ) : SyncEntity
 
@@ -37,10 +44,15 @@ data class Task(
 @Serializable
 data class TaskDraft(
     val title: String,
+    @SerialName("due_at")
     val dueAt: Instant? = null,
+    @SerialName("project_id")
     val projectId: EntityId? = null,
+    @SerialName("area_id")
     val areaId: EntityId? = null,
+    @SerialName("source_type")
     val sourceType: EntityKind? = null,
+    @SerialName("source_id")
     val sourceId: EntityId? = null,
 )
 
@@ -48,8 +60,10 @@ data class TaskDraft(
 @Serializable
 data class TaskPatch(
     val title: String? = null,
+    @SerialName("due_at")
     val dueAt: Instant? = null,
     val status: TaskStatus? = null,
+    @SerialName("project_id")
     val projectId: EntityId? = null,
 )
 

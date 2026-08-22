@@ -13,6 +13,16 @@ import dev.magnor.kompakt.data.fake.FakeSyncRepository
 import dev.magnor.kompakt.data.fake.FakeTaskRepository
 import dev.magnor.kompakt.data.fake.FakeTodayRepository
 import dev.magnor.kompakt.data.fake.IdempotencyRegistry
+import dev.magnor.kompakt.data.remote.HttpApi
+import dev.magnor.kompakt.data.remote.RemoteAgentRepository
+import dev.magnor.kompakt.data.remote.RemoteCaptureRepository
+import dev.magnor.kompakt.data.remote.RemoteChatRepository
+import dev.magnor.kompakt.data.remote.RemoteInboxRepository
+import dev.magnor.kompakt.data.remote.RemoteNoteRepository
+import dev.magnor.kompakt.data.remote.RemoteOrganizationRepository
+import dev.magnor.kompakt.data.remote.RemoteSyncRepository
+import dev.magnor.kompakt.data.remote.RemoteTaskRepository
+import dev.magnor.kompakt.data.remote.RemoteTodayRepository
 import dev.magnor.kompakt.data.repository.AgentRepository
 import dev.magnor.kompakt.data.repository.CaptureRepository
 import dev.magnor.kompakt.data.repository.ChatRepository
@@ -41,11 +51,20 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Manual dependency container — no DI framework, the APK stays easy to
- * audit (docs/technical-architecture.md). Phase 2 wires fake repositories;
- * Phase 3+ swaps them for HTTP-backed implementations behind the same
- * interfaces. One instance lives for the app process lifetime.
+ * audit (docs/technical-architecture.md). Fake mode ships demo data;
+ * Remote mode talks to the coordinator's /v1/ contract. The switch is
+ * explicit so the demo build never silently hits a network.
  */
+sealed interface ServerMode {
+    /** In-memory demo data (Phase 2 fakes). */
+    data object Fake : ServerMode
+
+    /** Live coordinator: base URL (e.g. http://dev-server.example.ts.net:8650) + bearer token. */
+    data class Remote(val baseUrl: String, val token: String) : ServerMode
+}
+
 class AppContainer(
+    val mode: ServerMode = ServerMode.Fake,
     val clock: () -> Instant = { FakeData.NOW },
 ) {
 
@@ -71,7 +90,13 @@ class AppContainer(
     private val areaStore = FakeStore<Area>(EntityKind.AREA, changeLog, now)
     private val inboxStore = FakeStore<InboxItem>(EntityKind.INBOX_ITEM, changeLog, now)
 
-    // ---- repositories (interfaces are the contract; fakes are the Phase 2 impl) ----
+    // ---- remote plumbing (null in Fake mode) ----
+
+    private val remoteApi: HttpApi? = (mode as? ServerMode.Remote)?.let {
+        HttpApi(baseUrl = it.baseUrl, token = it.token)
+    }
+
+    // ---- repositories (interfaces are the contract; mode picks the impl) ----
 
     private val fakeChats = FakeChatRepository(
         threads = threadStore, messages = messageStore,
@@ -88,37 +113,42 @@ class AppContainer(
         notes = noteStore, idempotency = idempotency, nextId = { nextId("note") }, now = now,
     )
 
-    val chatRepository: ChatRepository = fakeChats
-    val agentRepository: AgentRepository = fakeAgents
-    val taskRepository: TaskRepository = fakeTasks
-    val noteRepository: NoteRepository = fakeNotes
-    val organizationRepository: OrganizationRepository = FakeOrganizationRepository(
-        projects = projectStore, areas = areaStore,
-    )
-    val inboxRepository: InboxRepository = FakeInboxRepository(
-        items = inboxStore, idempotency = idempotency,
-    )
-    val todayRepository: TodayRepository = FakeTodayRepository(
-        events = FakeData.calendarEvents,
-        tasks = fakeTasks,
-        inbox = inboxRepository,
-        agents = fakeAgents,
-        notes = fakeNotes,
-        now = now,
-    )
-    val captureRepository: CaptureRepository = FakeCaptureRepository(
-        tasks = fakeTasks,
-        notes = fakeNotes,
-        chats = fakeChats,
-        agents = fakeAgents,
-        idempotency = idempotency,
-        now = now,
-    )
+    val chatRepository: ChatRepository = remoteApi?.let(::RemoteChatRepository) ?: fakeChats
+    val agentRepository: AgentRepository = remoteApi?.let(::RemoteAgentRepository) ?: fakeAgents
+    val taskRepository: TaskRepository = remoteApi?.let(::RemoteTaskRepository) ?: fakeTasks
+    val noteRepository: NoteRepository = remoteApi?.let(::RemoteNoteRepository) ?: fakeNotes
+    val organizationRepository: OrganizationRepository = remoteApi?.let(::RemoteOrganizationRepository)
+        ?: FakeOrganizationRepository(
+            projects = projectStore, areas = areaStore,
+        )
+    val inboxRepository: InboxRepository = remoteApi?.let(::RemoteInboxRepository)
+        ?: FakeInboxRepository(
+            items = inboxStore, idempotency = idempotency,
+        )
+    val todayRepository: TodayRepository = remoteApi?.let(::RemoteTodayRepository)
+        ?: FakeTodayRepository(
+            events = FakeData.calendarEvents,
+            tasks = fakeTasks,
+            inbox = inboxRepository,
+            agents = fakeAgents,
+            notes = fakeNotes,
+            now = now,
+        )
+    val captureRepository: CaptureRepository = remoteApi?.let(::RemoteCaptureRepository)
+        ?: FakeCaptureRepository(
+            tasks = fakeTasks,
+            notes = fakeNotes,
+            chats = fakeChats,
+            agents = fakeAgents,
+            idempotency = idempotency,
+            now = now,
+        )
 
     private val lastSyncState = MutableStateFlow<Instant?>(null)
-    val syncRepository: SyncRepository = FakeSyncRepository(
-        changeLog = changeLog, lastSync = lastSyncState, now = now,
-    )
+    val syncRepository: SyncRepository = remoteApi?.let(::RemoteSyncRepository)
+        ?: FakeSyncRepository(
+            changeLog = changeLog, lastSync = lastSyncState, now = now,
+        )
 
     init {
         threadStore.seed(FakeData.chatThreads)

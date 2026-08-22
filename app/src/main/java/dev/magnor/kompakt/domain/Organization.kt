@@ -4,6 +4,7 @@ package dev.magnor.kompakt.domain
 
 import kotlinx.datetime.Instant
 import kotlinx.datetime.serializers.InstantIso8601Serializer
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 
@@ -26,10 +27,14 @@ data class Project(
     override val id: EntityId,
     val name: String,
     val status: ProjectStatus = ProjectStatus.ACTIVE,
+    @SerialName("current_goal")
     val currentGoal: String? = null,
+    @SerialName("next_action")
     val nextAction: String? = null,
+    @SerialName("attention_count")
     val attentionCount: Int = 0,
     override val revision: Long = 1,
+    @SerialName("updated_at")
     override val updatedAt: Instant,
 ) : SyncEntity
 
@@ -39,5 +44,6 @@ data class Area(
     val name: String,
     val description: String = "",
     override val revision: Long = 1,
+    @SerialName("updated_at")
     override val updatedAt: Instant,
 ) : SyncEntity

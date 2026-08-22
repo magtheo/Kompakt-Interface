@@ -4,6 +4,7 @@ package dev.magnor.kompakt.domain
 
 import kotlinx.datetime.Instant
 import kotlinx.datetime.serializers.InstantIso8601Serializer
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 
@@ -30,8 +31,10 @@ data class Agent(
     val status: AgentStatus = AgentStatus.IDLE,
     val description: String = "",
     val capabilities: List<String> = emptyList(),
+    @SerialName("last_activity")
     val lastActivity: Instant? = null,
     override val revision: Long = 1,
+    @SerialName("updated_at")
     override val updatedAt: Instant,
 ) : SyncEntity
 
@@ -56,15 +59,21 @@ enum class AgentRunStatus(val wire: String) {
 @Serializable
 data class AgentRun(
     override val id: EntityId,
+    @SerialName("agent_id")
     val agentId: EntityId,
     val title: String,
     val objective: String,
     val status: AgentRunStatus = AgentRunStatus.QUEUED,
+    @SerialName("started_at")
     val startedAt: Instant,
+    @SerialName("updated_at")
     override val updatedAt: Instant = startedAt,
     override val revision: Long = 1,
+    @SerialName("result_summary")
     val resultSummary: String? = null,
+    @SerialName("requires_input")
     val requiresInput: Boolean = false,
+    @SerialName("project_id")
     val projectId: EntityId? = null,
     val archived: Boolean = false,
 ) : SyncEntity

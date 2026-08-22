@@ -2,6 +2,7 @@ package dev.magnor.kompakt.domain
 
 import kotlinx.datetime.Instant
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -71,5 +72,6 @@ open class SafeEnumSerializer<T : Enum<T>>(
 interface SyncEntity {
     val id: EntityId
     val revision: Long
+    @SerialName("updated_at")
     val updatedAt: Instant
 }
