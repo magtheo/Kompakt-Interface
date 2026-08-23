@@ -29,6 +29,7 @@ import dev.magnor.kompakt.data.repository.ChatRepository
 import dev.magnor.kompakt.data.repository.InboxRepository
 import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.data.repository.OrganizationRepository
+import dev.magnor.kompakt.data.repository.QueueingCaptureRepository
 import dev.magnor.kompakt.data.repository.SyncRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
@@ -50,15 +51,18 @@ import dev.magnor.kompakt.domain.InboxItem
 import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.Note
 import dev.magnor.kompakt.domain.NoteDraft
+import dev.magnor.kompakt.domain.OfflineException
 import dev.magnor.kompakt.domain.Project
 import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.ServerStatus
+import dev.magnor.kompakt.domain.ServerUnavailableException
 import dev.magnor.kompakt.domain.SyncCursorValue
 import dev.magnor.kompakt.domain.Task
 import dev.magnor.kompakt.domain.TaskDraft
 import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.domain.TaskPatch
 import dev.magnor.kompakt.domain.TodayProjection
+import dev.magnor.kompakt.domain.UnauthorizedException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -93,6 +97,7 @@ class AppContainer(
     val mode: ServerMode = ServerMode.Fake,
     val clock: () -> Instant = { FakeData.NOW },
     secretVault: SecretVault? = null,
+    captureQueueDir: java.io.File? = null,
 ) {
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -198,6 +203,8 @@ class AppContainer(
         val stack = RemoteStack(api)
         remoteStack = stack
         capabilityStore.refresh(stack.sync)
+        // Connectivity (or enrollment) just (re)appeared — drain parked captures.
+        scope.launch { flushPendingCaptures() }
     }
 
     private fun deactivateRemote() {
@@ -240,8 +247,40 @@ class AppContainer(
     val organizationRepository: OrganizationRepository = SwitchOrganization()
     val inboxRepository: InboxRepository = SwitchInbox()
     val todayRepository: TodayRepository = SwitchToday()
-    val captureRepository: CaptureRepository = SwitchCapture()
+    /** Offline capture queue — commits parked while offline, re-sent with
+     * the same request id once a remote stack is active. */
+    val pendingCaptures = PendingCaptureStore(captureQueueDir)
+
+    val captureRepository: CaptureRepository =
+        QueueingCaptureRepository(SwitchCapture(), pendingCaptures) { flushPendingCaptures() }
     val syncRepository: SyncRepository = SwitchSync()
+
+    /**
+     * Re-send queued captures through the ACTIVE stack. Returns how many
+     * were delivered. Stops at the first transport-level failure (still
+     * offline); permanently rejected captures are dropped — the server is
+     * authoritative and re-queuing a malformed proposal is pointless.
+     */
+    suspend fun flushPendingCaptures(): Int {
+        val stack = remoteStack ?: return 0
+        var flushed = 0
+        for (pending in pendingCaptures.all()) {
+            try {
+                stack.capture.commit(pending.proposal, pending.requestId)
+                pendingCaptures.remove(pending.requestId)
+                flushed++
+            } catch (e: OfflineException) {
+                break
+            } catch (e: UnauthorizedException) {
+                break // token revoked mid-flush — stop, re-enroll first
+            } catch (e: ServerUnavailableException) {
+                break // server broken — retry on next trigger
+            } catch (e: Exception) {
+                pendingCaptures.remove(pending.requestId) // rejected — drop
+            }
+        }
+        return flushed
+    }
 
     val remoteActive: Boolean get() = remoteStack != null
 

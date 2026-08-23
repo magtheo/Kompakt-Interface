@@ -93,5 +93,6 @@ class CaptureViewModel(
         is CaptureResult.NoteCreated -> "Note saved: ${result.note.preview}"
         is CaptureResult.ChatCreated -> "Chat created: ${result.thread.title}"
         is CaptureResult.AgentRequested -> "Agent run queued: ${result.run.title}"
+        CaptureResult.QueuedOffline -> "Saved offline — will send when the server is reachable"
     }
 }

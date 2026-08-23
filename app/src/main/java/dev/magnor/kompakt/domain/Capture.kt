@@ -42,4 +42,8 @@ sealed interface CaptureResult {
     data class NoteCreated(val note: Note) : CaptureResult
     data class ChatCreated(val thread: ChatThread) : CaptureResult
     data class AgentRequested(val run: AgentRun) : CaptureResult
+
+    /** Transport failed at commit time — parked in the offline queue and
+     * will be re-sent with the same request id (idempotent replay). */
+    data object QueuedOffline : CaptureResult
 }
