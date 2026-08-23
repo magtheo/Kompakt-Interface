@@ -54,8 +54,14 @@ class EnrollmentViewModel(
                 )
                 _ui.value = _ui.value.copy(busy = false, message = null)
             } catch (e: OfflineException) {
-                _ui.value = _ui.value.copy(busy = false, message = "Could not reach server — check address and network")
+                android.util.Log.w("Enrollment", "enroll unreachable", e)
+                val cause = e.cause?.message ?: e.message
+                _ui.value = _ui.value.copy(
+                    busy = false,
+                    message = "Could not reach server — ${cause ?: "check address and network"}",
+                )
             } catch (e: Exception) {
+                android.util.Log.w("Enrollment", "enroll failed", e)
                 _ui.value = _ui.value.copy(busy = false, message = e.message ?: "enrollment failed")
             }
         }

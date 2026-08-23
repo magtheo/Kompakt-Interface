@@ -7,4 +7,5 @@
 - [x] T-004 Phase 3 — Server contract skeleton (capabilities + read endpoints)
 - [x] T-005 Phase 4 — Device enrollment + security boundary
 - [x] T-006 Phase 5 — Today + Organize vertical slice
+- [ ] T-007 Phase 6 — Capture pipeline (interpret → confirm → commit, offline queue)
 

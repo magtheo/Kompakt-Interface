@@ -34,11 +34,15 @@ import dev.magnor.kompakt.domain.TaskDraft
 import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.domain.TaskPatch
 import dev.magnor.kompakt.domain.TodayProjection
+import dev.magnor.kompakt.domain.KompaktJson
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Instant
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 
 /**
  * HTTP-backed repositories against the /v1/ contract (T-004).
@@ -169,9 +173,73 @@ class RemoteAgentRepository(private val api: HttpApi) : AgentRepository {
         writesLandInPhase6("agent actions")
 }
 
+// ─── Capture pipeline (Phase 6: interpret → confirm → commit) ──────────
+
+@Serializable
+private data class InterpretBody(val text: String)
+
+@Serializable
+private data class CaptureCommitBody(
+    @SerialName("request_id") val requestId: RequestId,
+    @SerialName("proposed_type") val proposedType: String,
+    val title: String,
+    val text: String? = null,
+    @SerialName("due_at") val dueAt: String? = null,
+    @SerialName("project_id") val projectId: EntityId? = null,
+    @SerialName("area_id") val areaId: EntityId? = null,
+)
+
+/** Server commit envelope. `kind` discriminates; payload fields are
+ * optional so unknown future kinds decode without crashing (protocol §9). */
+@Serializable
+private data class CaptureCommitResponse(
+    val replayed: Boolean = false,
+    val kind: String,
+    val task: Task? = null,
+    val note: NoteCreatedDto? = null,
+)
+
+/** Note payloads are minimal until the Notes read phase fixes their wire
+ * shape — decode narrowly and map, instead of forcing the full Note DTO. */
+@Serializable
+private data class NoteCreatedDto(
+    val id: EntityId,
+    val title: String,
+    val revision: Long = 1,
+    @SerialName("updated_at") val updatedAt: String,
+)
+
 class RemoteCaptureRepository(private val api: HttpApi) : CaptureRepository {
-    override suspend fun interpret(input: String): CaptureProposal =
-        writesLandInPhase6("capture interpretation")
-    override suspend fun commit(proposal: CaptureProposal, requestId: RequestId): CaptureResult =
-        writesLandInPhase6("capture commit")
+    override suspend fun interpret(input: String): CaptureProposal {
+        val body = KompaktJson.encodeToString(InterpretBody(input))
+        return KompaktJson.decodeFromString(api.post("/v1/capture/interpret", body))
+    }
+
+    override suspend fun commit(proposal: CaptureProposal, requestId: RequestId): CaptureResult {
+        val body = CaptureCommitBody(
+            requestId = requestId,
+            proposedType = proposal.proposedType.wire,
+            title = proposal.title,
+            text = proposal.text,
+            dueAt = proposal.dueAt?.toString(),
+            projectId = proposal.projectId,
+            areaId = proposal.areaId,
+        )
+        val response: CaptureCommitResponse = KompaktJson.decodeFromString(
+            api.post("/v1/capture/commit", KompaktJson.encodeToString(body), requestId),
+        )
+        return when (response.kind) {
+            "task_created" -> response.task
+                ?.let { CaptureResult.TaskCreated(it) }
+                ?: throw RepositoryException("server confirmed a task without a task payload")
+            "note_created" -> response.note?.let {
+                val at = runCatching { Instant.parse(it.updatedAt) }
+                    .getOrDefault(Instant.fromEpochSeconds(0))
+                CaptureResult.NoteCreated(
+                    Note(id = it.id, text = it.title, createdAt = at, updatedAt = at),
+                )
+            } ?: throw RepositoryException("server confirmed a note without a note payload")
+            else -> throw RepositoryException("unknown capture result: ${response.kind}")
+        }
+    }
 }

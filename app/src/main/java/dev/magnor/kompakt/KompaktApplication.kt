@@ -7,6 +7,9 @@ import dev.magnor.kompakt.data.security.KeystoreSecretVault
 /** Process-lifetime owner of the dependency container (manual DI). */
 class KompaktApplication : Application() {
     val container: AppContainer by lazy {
-        AppContainer(secretVault = KeystoreSecretVault(this))
+        AppContainer(
+            secretVault = KeystoreSecretVault(this),
+            captureQueueDir = java.io.File(filesDir, "captures"),
+        )
     }
 }
