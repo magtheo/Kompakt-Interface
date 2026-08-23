@@ -1,6 +1,7 @@
 package dev.magnor.kompakt.domain
 
 import dev.magnor.kompakt.data.AppContainer
+import dev.magnor.kompakt.data.fake.FakeData
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
@@ -21,7 +22,7 @@ class DomainModelTest {
 
     @Before
     fun setUp() {
-        container = AppContainer()
+        container = AppContainer(clock = { FakeData.NOW }) // frozen seed time → seeded entities land in "today"
     }
 
     // ---- protocol negotiation (§9) ----
