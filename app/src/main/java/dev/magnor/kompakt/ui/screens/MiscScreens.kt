@@ -15,6 +15,7 @@ import com.mudita.mmd.components.buttons.OutlinedButtonMMD
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.AppInfo
 import dev.magnor.kompakt.data.EnrollmentManager
+import dev.magnor.kompakt.data.ThemePolarity
 import dev.magnor.kompakt.domain.CaptureType
 import dev.magnor.kompakt.domain.ProtocolVerdict
 import dev.magnor.kompakt.ui.containerViewModel
@@ -22,6 +23,7 @@ import dev.magnor.kompakt.ui.relativeTo
 import dev.magnor.kompakt.ui.viewmodels.CaptureViewModel
 import dev.magnor.kompakt.ui.viewmodels.DiagnosticsViewModel
 import dev.magnor.kompakt.ui.viewmodels.EnrollmentViewModel
+import dev.magnor.kompakt.ui.viewmodels.ThemeViewModel
 
 /**
  * Universal capture — propose → user confirms type → commit.
@@ -177,6 +179,9 @@ fun SettingsScreen(
     viewModel: EnrollmentViewModel = containerViewModel {
         EnrollmentViewModel(it.enrollment)
     },
+    themeViewModel: ThemeViewModel = containerViewModel {
+        ThemeViewModel(it.themeStore)
+    },
 ) {
     val ui by viewModel.ui.collectAsState()
     val enrollment by viewModel.enrollmentState.collectAsState()
@@ -247,6 +252,20 @@ fun SettingsScreen(
             }
         }
         ui.message?.let { ListRow(title = it) }
+
+        SectionLabel("Appearance")
+        val polarity by themeViewModel.polarity.collectAsState()
+        ListRow(
+            title = "Light",
+            trailing = if (polarity == ThemePolarity.LIGHT) "✓" else null,
+            onClick = { themeViewModel.setPolarity(ThemePolarity.LIGHT) },
+        )
+        ListRow(
+            title = "Inverted",
+            subtitle = "Night reading — flips ink polarity",
+            trailing = if (polarity == ThemePolarity.INVERTED) "✓" else null,
+            onClick = { themeViewModel.setPolarity(ThemePolarity.INVERTED) },
+        )
 
         SectionLabel("Protocol")
         ListRow(title = "Client", subtitle = "v${AppInfo.APP_PROTOCOL} · minimum server v${AppInfo.MINIMUM_SERVER_PROTOCOL}")

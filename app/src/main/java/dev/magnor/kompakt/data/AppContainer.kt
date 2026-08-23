@@ -106,7 +106,13 @@ class AppContainer(
     val clock: () -> Instant = Clock.System::now,
     secretVault: SecretVault? = null,
     captureQueueDir: java.io.File? = null,
+    themeStore: ThemeStore? = null,
 ) {
+    /** Ink polarity (Light/Inverted) — file-backed, process-lifetime. */
+    val themeStore: ThemeStore =
+        themeStore
+            ?: ThemeStore(java.io.File(System.getProperty("java.io.tmpdir"), "kompakt-theme.txt"))
+
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
