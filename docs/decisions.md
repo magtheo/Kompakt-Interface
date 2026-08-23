@@ -547,6 +547,75 @@ record.)
 
 ---
 
+## D024 — Chat replies are server-generated via a swappable OpenAI-compatible backend
+
+**Status:** Accepted (Aug 2026 — implemented in vault-coordinator V-050 / T-009)
+
+The assistant messages in a chat thread are generated **server-side**: the
+coordinator owns `chat_threads`/`chat_messages` as source of truth and proxies
+completion requests to an OpenAI-compatible endpoint. The default and reference
+backend is the **local Hermes API server** (`127.0.0.1:8642`); any
+OpenAI-compatible server substitutes via a single `chat:` config block
+(base URL, model, timeout) — no code changes.
+
+Rules that follow:
+
+- **The phone never talks to the LLM directly.** One auth surface (the
+  coordinator), one wire contract; the model is configuration, not
+  architecture.
+- **Chat ≠ agent** (D003): this backend answers conversational messages only.
+  Autonomous execution is D025's domain.
+- Model choice is an e-ink UX concern the coordinator owns: reasoning-merged
+  outputs (e.g. deepseek-v4 via the Hermes API flattening) leak chain-of-thought
+  into message content; shipping model must produce clean single-message
+  replies (claude-sonnet-4 verified).
+- Send latency is LLM-bound; the wire contract already carries a per-call
+  client timeout override for chat sends (120 s). LLM failure degrades to an
+  honest assistant note — a send never fails because generation did.
+
+---
+
+## D025 — Agent orchestration is a coordinator-internal port; Warren is the reference adapter
+
+**Status:** Accepted (Aug 2026, planning — executes at Phase 8)
+
+The Agents surface is served through an **`AgentBackend` port inside the
+coordinator** — a small, domain-side interface (~7 operations: list agents,
+dispatch, get run, read events, steer, cancel, result) that adapters translate
+to concrete backends. No backend's API shapes leak into `/v1/`.
+
+- **Reference adapter: Warren** (jayminwest/warren, MIT, self-hosted) driving
+  **Pi (Oh My Pi)** harnesses — worktree/Docker-isolated runs, NDJSON event
+  streams with bounded polling reads, mid-run steering, cancel, plan-runs with
+  pause/resume ("needs input"), cost analytics, guaranteed pushed-branch
+  output. Deployed localhost-only behind the coordinator; its single bearer
+  token never leaves the host.
+- **Second adapter: OpenCode** (session-flavored: monitor + message, no
+  workload semantics). The port is not considered final until this second
+  implementation exists — **rule of two**: no generalizing before two concrete
+  adapters, no third backend before the port is locked.
+- **Capability-gated surface**: backends declare power (steer, cancel,
+  scheduled triggers…); flags flow through `/v1/capabilities`; the app hides
+  actions the backend cannot honor — fail-closed, per D019/D021.
+- **`agents.backend: warren | opencode | none`** config selects; `none` gates
+  the tab off. Minimal third-party install = coordinator + chosen backend
+  adapter + APK.
+- **Coordinator DB persists a run projection** — the phone-visible Agent/AgentRun
+  history survives a backend swap; adapters are translators, not owners.
+
+Distribution implication (D023): other operators bring their own stack —
+OpenCode-only, Warren, or a custom control plane behind a written adapter —
+and the client stays identical. This is the "email model" applied to
+orchestration: general at the domain boundary, specific inside adapters.
+Refusing: a universal agent protocol with N optional fields; the port stays
+minimal and domain-derived.
+
+Related: dev-server's AI Control Plane Executor is effectively superseded by
+Warren for containerized run workloads (documented in the vault research note,
+2026-08-23); SLE v2 SDK work is a different layer and unaffected.
+
+---
+
 ## Deferred Decisions
 
 The following remain intentionally open:
