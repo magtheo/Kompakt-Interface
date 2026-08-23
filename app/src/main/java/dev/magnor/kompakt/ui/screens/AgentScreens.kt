@@ -7,6 +7,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -433,35 +437,33 @@ fun AgentRunDetailScreen(
         composer = {
             if (run != null && resumable && run?.state?.isTerminal == false) {
                 Column {
-                    OutlinedTextField(
-                        value = message,
-                        onValueChange = { message = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { TextMMD("Message the session") },
-                        singleLine = false,
-                        maxLines = 3,
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        ButtonMMD(
+                    // T-015: single-row composer — field + compact send beside it.
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        OutlinedTextField(
+                            value = message,
+                            onValueChange = { message = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { TextMMD("Message the session") },
+                            singleLine = false,
+                            maxLines = 4,
+                        )
+                        IconButton(
                             onClick = {
                                 viewModel.send(message)
                                 message = ""
                             },
-                            modifier = Modifier.weight(1f),
                             enabled = message.isNotBlank(),
-                        ) { TextMMD("Send") }
-                        if (info?.liveSteering == true) {
-                            OutlinedButtonMMD(
-                                onClick = { viewModel.steer(message) },
-                                modifier = Modifier.weight(1f),
-                                enabled = message.isNotBlank(),
-                            ) { TextMMD("Steer") }
-                        }
+                            modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
+                        ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
+                    }
+                    if (info?.liveSteering == true) {
+                        OutlinedButtonMMD(
+                            onClick = { viewModel.steer(message) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            enabled = message.isNotBlank(),
+                        ) { TextMMD("Steer instead (mid-run)") }
                     }
                 }
             }

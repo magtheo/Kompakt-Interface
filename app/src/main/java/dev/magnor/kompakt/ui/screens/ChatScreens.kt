@@ -8,6 +8,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -202,33 +206,28 @@ fun ChatThreadScreen(
                         onClick = viewModel::cancelEdit,
                     )
                 }
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = viewModel::onDraftChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { TextMMD(if (editing != null) "Edited message" else "Message") },
-                    enabled = !sending,
-                    singleLine = false,
-                    maxLines = 6,
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (editing != null) {
-                        ButtonMMD(
-                            onClick = viewModel::cancelEdit,
-                            modifier = Modifier.weight(1f),
-                            enabled = !sending,
-                        ) { TextMMD("Cancel edit") }
-                    }
-                    ButtonMMD(
-                        onClick = viewModel::send,
+                // T-015: single-row composer — field + compact send beside it
+                // (bottom-aligned so it tracks the last line as the draft grows).
+                Row(verticalAlignment = Alignment.Bottom) {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = viewModel::onDraftChange,
                         modifier = Modifier.weight(1f),
+                        placeholder = { TextMMD(if (editing != null) "Edited message" else "Message") },
+                        enabled = !sending,
+                        singleLine = false,
+                        maxLines = 6,
+                    )
+                    IconButton(
+                        onClick = viewModel::send,
                         enabled = draft.isNotBlank() && !sending,
-                    ) { TextMMD(if (sending) "Sending…" else if (editing != null) "Send edit" else "Send") }
+                        modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = if (editing != null) "Send edit" else "Send",
+                        )
+                    }
                 }
             }
         },
