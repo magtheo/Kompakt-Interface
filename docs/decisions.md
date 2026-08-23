@@ -607,12 +607,71 @@ Distribution implication (D023): other operators bring their own stack —
 OpenCode-only, Warren, or a custom control plane behind a written adapter —
 and the client stays identical. This is the "email model" applied to
 orchestration: general at the domain boundary, specific inside adapters.
+
 Refusing: a universal agent protocol with N optional fields; the port stays
 minimal and domain-derived.
 
 Related: dev-server's AI Control Plane Executor is effectively superseded by
 Warren for containerized run workloads (documented in the vault research note,
 2026-08-23); SLE v2 SDK work is a different layer and unaffected.
+
+---
+
+## D026 — Conversation editing is destructive and branch-free, built on one server primitive
+
+**Status:** Accepted (Aug 2026 — coordinator V-054 / app T-013)
+
+Chat threads have no versioned history and no client-side branches.
+Every "go back" interaction composes exactly two server operations:
+the **truncate** primitive (`POST /v1/chats/{id}/truncate`, idempotent,
+`chat.write`-gated, deletes rows after a cursor) and a normal send.
+
+- **Edit** = truncate before the message, then send the new text.
+- **Revert to here** = truncate through the end.
+- **Regenerate** = truncate before the assistant reply, resend the same text.
+- No forks, no "other branch" navigation, no undo beyond what the
+  server has already deleted. What is dropped is gone.
+
+Rules that follow:
+
+- The server is the only editor of record (D001/D011 lineage): the
+  client never rewrites its local copy except by refetching after
+  truncation — optimistic UI applies to sends only.
+- `request_id` idempotency covers both the send and the truncate, so
+  a retried edit/revert/regenerate cannot double-delete or double-send.
+- Agent run transcripts reuse the same conversation layout but are
+  append-only observations of backend events — no truncate semantics
+  exist there, and the UI must not imply them.
+
+---
+
+## D027 — LLM replies render a restricted markdown subset, monochrome-only
+
+**Status:** Accepted (Aug 2026 — app T-014)
+
+Assistant messages (chat and agent dialogue events) render a fixed
+markdown subset via a dependency-free in-app parser feeding the MMD
+text component's `AnnotatedString` overload. No WebView, no
+third-party renderer, no HTML — ever (protocol constraint: responses
+are structured text, never arbitrary markup).
+
+Supported: headings, bullet/ordered/task lists (nested), fenced code
+blocks, quotes, rules, `**bold**`, `*italic*`, `***both***`, `` `code` ``,
+`~~strike~~`, `[label](url)` rendered as an underlined label.
+
+Deliberately unsupported:
+
+- `_underscore emphasis_` — snake_case identifiers would mangle;
+  asterisk-only, always,
+- tables and nested inline styles — rare in conversation, costly on
+  e-ink; render as plain text instead of breaking,
+- emphasis requires non-space content boundaries (`2 * 3 * 4` stays
+  literal — CommonMark rule).
+
+Styling is monochrome-only (weight, family, decoration, size — D017):
+no color, no animation; code blocks are bordered monospace cards.
+Message previews (thread lists, jump indexes) strip markers rather
+than render them.
 
 ---
 

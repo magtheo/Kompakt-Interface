@@ -197,19 +197,40 @@ Avoid dense previews.
 ```text
 GENERAL
 
-You
-How does X compare with Y?
+                    ┌─────────────────────────┐
+                    │ How does X compare to Y?│
+                    └─────────────────────────┘
+                    You · 09:12
+Markdown answer renders here: **bold** as
+weight, `code` as monospace, bullets,
+fenced code in a bordered block.
 
-Assistant
-...
-
-You
-And what about...
+Assistant · 09:13
 
 ────────────────────────────
-[ message field           ]
-[ 🎙 ]
+[ Message              (➤) ]
 ```
+
+Implemented layout rules (T-013/T-014/T-015):
+
+- transcript scrolls under a fixed top bar; the composer never
+  lives below the fold,
+- monochrome sender coding: user = right-shifted bordered card,
+  semi-bold; assistant = full-width plain text,
+- every message carries a `Sender · HH:mm` meta line; delivery
+  state rides on glyphs (pending/failed), never color,
+- one compact composer row: field + send icon button beside it
+  (bottom-aligned so it tracks the last line as the draft grows),
+  placeholder instead of a floating label,
+- tapping a message opens its action row:
+  - **Edit** — rewrite the conversation from here,
+  - **Revert to here** — drop everything after it,
+  - **Regenerate** — drop the reply and ask again,
+  all destructive, no branches (see D026),
+- a Jump-to-message inline index provides fast navigation in long
+  threads,
+- threads auto-title from the first user message server-side;
+  explicit titles are never overwritten.
 
 ### Chat principles
 
@@ -222,7 +243,8 @@ And what about...
   - Send to agent,
   - Attach to project.
 
-Long responses should be summarized or paged appropriately for E-Ink.
+Long responses render as markdown — the restricted subset defined
+in D027 — rather than being summarized or paged.
 
 ---
 
@@ -293,17 +315,28 @@ Comparing semantic model
 ```text
 PR #55 AUDIT
 
-Status
-Completed
+● Summary — Running · started 22:41
+────────────────────────────────
+user      Fix the flaky login test
+agent     Running: npm test …
+tool      bash (dim one-liner)
+agent     3 findings so far …
+────────────────────────────────
+[ Message the session      (➤) ]
+[ Steer instead (mid-run) ]
 
-Result
-3 findings...
-
-[Open result]
-[Discuss]
-[Create task]
-[Archive]
+Details ▾   ·   Run command ▾
+[ Discuss in chat ] [ Task ] [ Note ]
 ```
+
+Implemented as the same transcript-first layout as chat threads
+(T-013/T-015): dialogue events render in full (markdown-capable),
+process events collapse to dim one-liners; status collapses into
+one summary card with expandable Details; commands live behind an
+inline expandable section (no overlay menus — e-ink ghosting);
+transitions compact to a Discuss/Task/Note row. The composer
+appears only for resumable, non-terminal runs; Steer shows only
+when the backend advertises live steering.
 
 "Discuss" may open a chat seeded with relevant context.
 

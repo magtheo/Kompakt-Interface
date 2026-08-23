@@ -470,6 +470,11 @@ If the same `request_id` arrives twice, the server must not create two separate 
 
 The server should return the original result or equivalent stable outcome.
 
+Operations that carry `request_id` today: capture commit, chat send
+(replay returns the original exchange), and chat truncate (V-054 —
+replay is a no-op). Conversation editing (D026) composes truncate +
+send; both legs stay idempotent under retry.
+
 ---
 
 # 16. Offline Scope
