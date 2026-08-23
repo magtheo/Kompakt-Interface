@@ -5,6 +5,7 @@ import android.os.SystemClock
 import dev.magnor.kompakt.data.AppContainer
 import dev.magnor.kompakt.data.ConnectivityWatcher
 import dev.magnor.kompakt.data.FlushPolicy
+import dev.magnor.kompakt.data.ThemeStore
 import dev.magnor.kompakt.data.security.KeystoreSecretVault
 
 /** Process-lifetime owner of the dependency container (manual DI). */
@@ -13,6 +14,7 @@ class KompaktApplication : Application() {
         AppContainer(
             secretVault = KeystoreSecretVault(this),
             captureQueueDir = java.io.File(filesDir, "captures"),
+            themeStore = ThemeStore(java.io.File(filesDir, "theme.txt")),
         )
     }
 
