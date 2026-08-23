@@ -78,3 +78,13 @@ data class ChatThreadDraft(
     @SerialName("is_temporary")
     val isTemporary: Boolean = false,
 )
+
+/**
+ * Result of one send: the acknowledged user message plus the generated
+ * assistant reply (null when the backend produced none — LLM failure
+ * degrades server-side to an honest note, so null only on odd wire).
+ */
+data class ChatExchange(
+    val user: Message,
+    val assistant: Message?,
+)

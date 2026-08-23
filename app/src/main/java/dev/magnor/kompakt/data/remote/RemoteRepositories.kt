@@ -15,6 +15,7 @@ import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.CapabilitySet
 import dev.magnor.kompakt.domain.ChangePage
+import dev.magnor.kompakt.domain.ChatExchange
 import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.CaptureProposal
@@ -143,15 +144,56 @@ class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
     override fun observeThread(id: EntityId): Flow<ChatThread?> =
         observeThreads().map { list -> list.firstOrNull { it.id == id } }
     override fun observeMessages(chatId: EntityId): Flow<List<Message>> = flow {
-        // No per-chat message endpoint in v0.1 (chat feature flag is false);
-        // the shape stays valid so Phase 7+ only adds the endpoint.
-        emit(emptyList())
+        emit(api.decodeList("/v1/chats/$chatId/messages", "messages"))
     }
-    override suspend fun getThread(id: EntityId): ChatThread? = null
-    override suspend fun createThread(draft: ChatThreadDraft, requestId: RequestId): ChatThread =
-        writesLandInPhase6("creating chats")
-    override suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): Message =
-        writesLandInPhase6("sending messages")
+
+    override suspend fun getThread(id: EntityId): ChatThread? = try {
+        api.decode<ChatEnvelope>("/v1/chats/$id").chat
+    } catch (_: RepositoryException) {
+        null // 404 and other rejects → absent (contract: repository returns null)
+    }
+
+    override suspend fun createThread(draft: ChatThreadDraft, requestId: RequestId): ChatThread {
+        @Serializable
+        data class CreateBody(
+            @SerialName("request_id") val requestId: RequestId,
+            val title: String,
+            @SerialName("project_id") val projectId: EntityId? = null,
+            @SerialName("is_temporary") val isTemporary: Boolean = false,
+        )
+        val body = CreateBody(requestId, draft.title, draft.projectId, draft.isTemporary)
+        return api.post(
+            "/v1/chats",
+            KompaktJson.encodeToString(body),
+            requestId,
+        ).let { KompaktJson.decodeFromString<ChatEnvelope>(it).chat }
+    }
+
+    override suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): ChatExchange {
+        @Serializable
+        data class SendBody(
+            @SerialName("request_id") val requestId: RequestId,
+            val text: String,
+        )
+        val body = SendBody(requestId, text)
+        // Server-side LLM generation may take tens of seconds.
+        val envelope = api.post(
+            "/v1/chats/$chatId/messages",
+            KompaktJson.encodeToString(body),
+            requestId,
+            timeoutSeconds = 120,
+        ).let { KompaktJson.decodeFromString<SendEnvelope>(it) }
+        return ChatExchange(user = envelope.message, assistant = envelope.assistantMessage)
+    }
+
+    @Serializable
+    private data class ChatEnvelope(val chat: ChatThread)
+
+    @Serializable
+    private data class SendEnvelope(
+        val message: Message,
+        @SerialName("assistant_message") val assistantMessage: Message? = null,
+    )
 }
 
 class RemoteAgentRepository(private val api: HttpApi) : AgentRepository {
