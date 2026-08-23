@@ -150,6 +150,7 @@ fun AgentDetailScreen(
     val info by viewModel.backendInfo.collectAsState()
     val runs by viewModel.runs.collectAsState()
     val feedback by viewModel.feedback.collectAsState()
+    val dispatched by viewModel.lastDispatched.collectAsState()
 
     var prompt by remember { mutableStateOf("") }
     var projectRef by remember { mutableStateOf("") }
@@ -208,6 +209,16 @@ fun AgentDetailScreen(
             TextMMD(if (info?.resumable == true) "Start session" else "Dispatch run")
         }
         feedback?.let { TextMMD(it, modifier = Modifier.padding(top = 8.dp)) }
+
+        // T-012: the dispatched run is a live path to its detail, not a text note.
+        dispatched?.let { run ->
+            ListRow(
+                title = "Dispatched: ${run.displayTitle}",
+                subtitle = "Tap to open",
+                trailing = runGlyph(run.state),
+                onClick = { onOpenRun(run.id) },
+            )
+        }
 
         SectionLabel("Runs")
         if (runs.isEmpty()) {

@@ -20,12 +20,14 @@ import dev.magnor.kompakt.domain.NoteDraft
 import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.TaskDraft
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -50,13 +52,21 @@ class AgentsListViewModel(
 /**
  * One worker role on one backend — a live view, not a stored entity.
  * Dispatch is the only write; the backend owns the resulting run.
+ *
+ * Remote observe flows are cold one-shot fetches, so the runs list is
+ * re-collected on a refresh tick raised after each dispatch (T-012: the
+ * phone E2E showed the list stale until back+re-enter). Same pattern as
+ * ChatThreadViewModel.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class AgentDetailViewModel(
     private val agentRepository: AgentRepository,
     backend: String,
     agentName: String,
     private val newRequestId: () -> RequestId,
 ) : ViewModel() {
+
+    private val refreshTick = MutableStateFlow(0)
 
     val role: StateFlow<AgentRole?> = agentRepository.observeSurface()
         .map { surface -> surface.agents.firstOrNull { it.backend == backend && it.name == agentName } }
@@ -66,12 +76,20 @@ class AgentDetailViewModel(
         .map { surface -> surface.backends[backend] }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val runs: StateFlow<List<AgentRun>> = agentRepository.observeRuns()
+    val runs: StateFlow<List<AgentRun>> = refreshTick
+        .flatMapLatest { agentRepository.observeRuns() }
         .map { list -> list.filter { it.backend == backend && it.agent == agentName } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _feedback = MutableStateFlow<String?>(null)
     val feedback: StateFlow<String?> = _feedback.asStateFlow()
+
+    /**
+     * The most recent successful dispatch — the screen renders it as a
+     * tappable "open run" row instead of a dead-end text note (T-012).
+     */
+    private val _lastDispatched = MutableStateFlow<AgentRun?>(null)
+    val lastDispatched: StateFlow<AgentRun?> = _lastDispatched.asStateFlow()
 
     fun dispatch(prompt: String, projectRef: String?) {
         if (prompt.isBlank()) return
@@ -87,7 +105,9 @@ class AgentDetailViewModel(
                     newRequestId(),
                 )
             }.onSuccess { run ->
-                _feedback.value = "Dispatched ${run.kind.wire} ${run.id}"
+                _lastDispatched.value = run
+                _feedback.value = null
+                refreshTick.value++ // re-collect the one-shot runs fetch
             }.onFailure { e ->
                 _feedback.value = "Dispatch failed: ${e.message}"
             }
@@ -99,7 +119,13 @@ class AgentDetailViewModel(
  * One execution: process-manager controls (send/steer/cancel/command,
  * capability-gated) plus the explicit D003 transitions routed through the
  * owning repositories — never silent conversions.
+ *
+ * Remote observe flows are cold one-shot fetches, so run/surface are
+ * re-collected on a refresh tick raised after every control action —
+ * the status row then reflects server-side changes without re-entering
+ * the screen (T-012).
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class AgentRunDetailViewModel(
     private val agentRepository: AgentRepository,
     private val taskRepository: TaskRepository,
@@ -109,19 +135,24 @@ class AgentRunDetailViewModel(
     private val newRequestId: () -> RequestId,
 ) : ViewModel() {
 
-    val run: StateFlow<AgentRun?> = agentRepository.observeRun(runId)
+    private val refreshTick = MutableStateFlow(0)
+
+    private val tickedRun = refreshTick.flatMapLatest { agentRepository.observeRun(runId) }
+    private val tickedSurface = refreshTick.flatMapLatest { agentRepository.observeSurface() }
+
+    val run: StateFlow<AgentRun?> = tickedRun
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val backendInfo: StateFlow<AgentBackendInfo?> = combine(
-        agentRepository.observeRun(runId),
-        agentRepository.observeSurface(),
+        tickedRun,
+        tickedSurface,
     ) { run, surface -> run?.backend?.let { surface.backends[it] } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Slash-commands when this run's backend advertises them. */
     val commands: StateFlow<List<AgentCommand>> = combine(
-        agentRepository.observeRun(runId),
-        agentRepository.observeSurface(),
+        tickedRun,
+        tickedSurface,
     ) { run, surface -> run?.backend?.takeIf { surface.backends[it]?.commands == true } }
         .distinctUntilChanged()
         .map { backend ->
@@ -163,6 +194,7 @@ class AgentRunDetailViewModel(
         viewModelScope.launch {
             runCatching { agentRepository.steer(runId, message.trim(), newRequestId()) }
                 .onSuccess { outcome ->
+                    refreshTick.value++
                     _feedback.value = when (outcome) {
                         SteerOutcome.DELIVERED -> "Steer delivered"
                         SteerOutcome.QUEUED -> "Steer queued for next turn"
@@ -222,7 +254,11 @@ class AgentRunDetailViewModel(
     private fun action(label: String, block: suspend () -> Any?) {
         viewModelScope.launch {
             runCatching { block() }
-                .onSuccess { _feedback.value = label; refreshEvidence() }
+                .onSuccess {
+                    _feedback.value = label
+                    refreshTick.value++ // run state may have moved server-side
+                    refreshEvidence()
+                }
                 .onFailure { e -> _feedback.value = "Failed: ${e.message}" }
         }
     }
