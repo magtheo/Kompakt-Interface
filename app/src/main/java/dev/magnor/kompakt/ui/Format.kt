@@ -1,5 +1,8 @@
 package dev.magnor.kompakt.ui
 
+import dev.magnor.kompakt.domain.OfflineException
+import dev.magnor.kompakt.domain.ServerUnavailableException
+import dev.magnor.kompakt.domain.UnauthorizedException
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -44,4 +47,15 @@ fun Instant.dayLabel(now: Instant): String {
         this < now -> "Overdue"
         else -> dateShort()
     }
+}
+
+/**
+ * Map a repository failure to one short, static, actionable line
+ * (E-Ink rule: no dynamic error streams, no spinners).
+ */
+fun Throwable.userMessage(): String = when (this) {
+    is OfflineException -> "Server unreachable — check connection and reopen"
+    is UnauthorizedException -> "Device not authorized — re-enroll in Settings"
+    is ServerUnavailableException -> "Server error (HTTP $code) — try again later"
+    else -> "Could not load: ${message ?: "unknown error"}"
 }

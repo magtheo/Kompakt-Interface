@@ -47,13 +47,13 @@ import kotlinx.datetime.Instant
  * single-user client refreshes on navigation, which the protocol treats
  * as acceptable while cursor sync (D011) is the correctness mechanism.
  *
- * Writes throw until device enrollment lands (Phase 4): the server has
- * no authorized mutation path yet, and pretending otherwise would
+ * Writes throw until the Phase 6 capture/write pipeline lands: the server
+ * has no authorized mutation path yet, and pretending otherwise would
  * violate "security is server-enforced" (docs/security.md).
  */
 
-private fun writesLandInPhase4(what: String): Nothing =
-    throw RepositoryException("$what requires device enrollment (server writes land in Phase 4)")
+private fun writesLandInPhase6(what: String): Nothing =
+    throw RepositoryException("$what is not available yet — server writes land in Phase 6 (capture pipeline)")
 
 class RemoteSyncRepository(private val api: HttpApi) : SyncRepository {
     override suspend fun capabilities(): CapabilitySet = api.decode("/v1/capabilities")
@@ -92,13 +92,13 @@ class RemoteTaskRepository(private val api: HttpApi) : TaskRepository {
     override fun observeTask(id: EntityId): Flow<Task?> = flow { emit(getTask(id)) }
     override suspend fun getTask(id: EntityId): Task? = fetch().firstOrNull { it.id == id }
     override suspend fun createTask(draft: TaskDraft, requestId: RequestId): Task =
-        writesLandInPhase4("creating tasks")
+        writesLandInPhase6("creating tasks")
     override suspend fun completeTask(id: EntityId, expectedRevision: Long, requestId: RequestId): Task =
-        writesLandInPhase4("completing tasks")
+        writesLandInPhase6("completing tasks")
     override suspend fun postponeTask(id: EntityId, expectedRevision: Long, newDueAt: Instant?, requestId: RequestId): Task =
-        writesLandInPhase4("postponing tasks")
+        writesLandInPhase6("postponing tasks")
     override suspend fun updateTask(id: EntityId, expectedRevision: Long, patch: TaskPatch, requestId: RequestId): Task =
-        writesLandInPhase4("editing tasks")
+        writesLandInPhase6("editing tasks")
 }
 
 class RemoteNoteRepository(private val api: HttpApi) : NoteRepository {
@@ -108,7 +108,7 @@ class RemoteNoteRepository(private val api: HttpApi) : NoteRepository {
     override fun observeNote(id: EntityId): Flow<Note?> = flow { emit(getNote(id)) }
     override suspend fun getNote(id: EntityId): Note? = null // empty feed in v0.1
     override suspend fun createNote(draft: NoteDraft, requestId: RequestId): Note =
-        writesLandInPhase4("creating notes")
+        writesLandInPhase6("creating notes")
 }
 
 class RemoteOrganizationRepository(private val api: HttpApi) : OrganizationRepository {
@@ -129,7 +129,7 @@ class RemoteInboxRepository(private val api: HttpApi) : InboxRepository {
         emit(api.decodeList("/v1/inbox", "inbox_items"))
     }
     override suspend fun dismiss(id: EntityId, expectedRevision: Long, requestId: RequestId) =
-        writesLandInPhase4("dismissing inbox items")
+        writesLandInPhase6("dismissing inbox items")
 }
 
 class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
@@ -145,9 +145,9 @@ class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
     }
     override suspend fun getThread(id: EntityId): ChatThread? = null
     override suspend fun createThread(draft: ChatThreadDraft, requestId: RequestId): ChatThread =
-        writesLandInPhase4("creating chats")
+        writesLandInPhase6("creating chats")
     override suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): Message =
-        writesLandInPhase4("sending messages")
+        writesLandInPhase6("sending messages")
 }
 
 class RemoteAgentRepository(private val api: HttpApi) : AgentRepository {
@@ -164,14 +164,14 @@ class RemoteAgentRepository(private val api: HttpApi) : AgentRepository {
     override suspend fun getAgent(id: EntityId): Agent? = null
     override suspend fun getRun(id: EntityId): AgentRun? = null
     override suspend fun requestRun(agentId: EntityId, objective: String, requestId: RequestId): AgentRun =
-        writesLandInPhase4("starting agent runs")
+        writesLandInPhase6("starting agent runs")
     override suspend fun actOnRun(runId: EntityId, action: ActionType, requestId: RequestId): AgentRun =
-        writesLandInPhase4("agent actions")
+        writesLandInPhase6("agent actions")
 }
 
 class RemoteCaptureRepository(private val api: HttpApi) : CaptureRepository {
     override suspend fun interpret(input: String): CaptureProposal =
-        writesLandInPhase4("capture interpretation")
+        writesLandInPhase6("capture interpretation")
     override suspend fun commit(proposal: CaptureProposal, requestId: RequestId): CaptureResult =
-        writesLandInPhase4("capture commit")
+        writesLandInPhase6("capture commit")
 }
