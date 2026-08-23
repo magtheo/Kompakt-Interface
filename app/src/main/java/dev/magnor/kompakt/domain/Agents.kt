@@ -17,7 +17,10 @@ import kotlinx.serialization.UseSerializers
 /** What an agent backend actually honors (coordinator BackendCapabilities). */
 @Serializable
 data class AgentBackendInfo(
-    val name: String,
+    /** Not on the wire — /v1/agents keys backends by name (live-verified
+     *  T-011: values carry only the six capability booleans). Kept for
+     *  fake parity; defaults empty. */
+    val name: String = "",
     val sandboxed: Boolean = false,
     val resumable: Boolean = false,
     @SerialName("live_steering") val liveSteering: Boolean = false,
