@@ -25,9 +25,16 @@ class RoutesTest {
     @Test
     fun argRouteBuildersMatchTheirPatterns() {
         assertEquals("chat/9", Routes.chatThread("9"))
-        assertEquals("agents/2", Routes.agent("2"))
-        assertEquals("agents/2/runs/run-1", Routes.agentRun("2", "run-1"))
+        assertEquals("agents/warren/pi", Routes.agent("warren", "pi"))
+        assertEquals("runs/run_001", Routes.run("run_001"))
         assertEquals("item/task", Routes.item("task"))
+    }
+
+    @Test
+    fun builtRoutesResolveToTheirPatterns() {
+        // Builders must produce paths the NavHost patterns actually match.
+        assertTrue(Routes.agent("warren", "pi").matches(Regex(Routes.AGENT_DETAIL.replace("{backend}", "[^/]+").replace("{agentName}", "[^/]+"))))
+        assertTrue(Routes.run("run_001").matches(Regex(Routes.AGENT_RUN_DETAIL.replace("{runId}", "[^/]+"))))
     }
 
     @Test

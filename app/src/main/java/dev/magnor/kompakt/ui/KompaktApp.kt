@@ -149,23 +149,23 @@ private fun KompaktNavHost() {
             }
             composable(Routes.AGENTS_LIST) {
                 AgentsListScreen(
-                    onOpenAgent = { navController.navigate(Routes.agent(it)) },
+                    onOpenAgent = { backend, name ->
+                        navController.navigate(Routes.agent(backend, name))
+                    },
+                    onOpenRun = { navController.navigate(Routes.run(it)) },
                     onOpenInbox = { navController.navigate(Routes.INBOX) },
                 )
             }
             composable(Routes.AGENT_DETAIL) { entry ->
-                val agentId = entry.arguments?.getString("agentId").orEmpty()
                 AgentDetailScreen(
-                    agentId = agentId,
-                    onOpenRun = { runId ->
-                        navController.navigate(Routes.agentRun(agentId, runId))
-                    },
+                    backend = entry.arguments?.getString("backend").orEmpty(),
+                    agentName = entry.arguments?.getString("agentName").orEmpty(),
+                    onOpenRun = { navController.navigate(Routes.run(it)) },
                     onBack = { navController.popBackStack() },
                 )
             }
             composable(Routes.AGENT_RUN_DETAIL) { entry ->
                 AgentRunDetailScreen(
-                    agentId = entry.arguments?.getString("agentId").orEmpty(),
                     runId = entry.arguments?.getString("runId").orEmpty(),
                     onBack = { navController.popBackStack() },
                 )

@@ -12,8 +12,8 @@ object Routes {
     const val CHAT_LIST = "chat"
     const val CHAT_THREAD = "chat/{threadId}"
     const val AGENTS_LIST = "agents"
-    const val AGENT_DETAIL = "agents/{agentId}"
-    const val AGENT_RUN_DETAIL = "agents/{agentId}/runs/{runId}"
+    const val AGENT_DETAIL = "agents/{backend}/{agentName}"
+    const val AGENT_RUN_DETAIL = "runs/{runId}"
     const val MORE = "more"
     const val ORGANIZE = "organize"
     const val PROJECTS = "organize/projects"
@@ -37,8 +37,8 @@ object Routes {
     )
 
     fun chatThread(id: String) = "chat/$id"
-    fun agent(id: String) = "agents/$id"
-    fun agentRun(agentId: String, runId: String) = "agents/$agentId/runs/$runId"
+    fun agent(backend: String, name: String) = "agents/$backend/$name"
+    fun run(id: String) = "runs/$id"
     fun item(id: String) = "item/$id"
 
     /** Build a tasks route with at most one filter (project wins if both given). */

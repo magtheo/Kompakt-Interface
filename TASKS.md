@@ -9,4 +9,6 @@
 - [x] T-006 Phase 5 — Today + Organize vertical slice
 - [x] T-007 Phase 6 — Capture pipeline (interpret → confirm → commit, offline queue)
 - [x] T-008 Phase 9 — Connectivity watcher (auto-flush parked captures on reconnect, no restart)
+- [x] T-009 Phase 7 — Chat client (send + readTimeout fix, E2E verified)
+- [x] T-010 Phase 8 — Agents surface: V-052 contract port, backends/roles/runs UI, dispatch, steering, fakes + tests
 

@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.RowScope
 import dev.magnor.kompakt.domain.TaskStatus
+import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.ui.containerViewModel
 import dev.magnor.kompakt.ui.relativeTo
 import dev.magnor.kompakt.ui.timeOfDay
@@ -87,9 +88,9 @@ fun TodayScreen(
                     } else {
                         projection.agentActivity.forEach { run ->
                             ListRow(
-                                title = run.title,
+                                title = run.displayTitle,
                                 subtitle = run.resultSummary,
-                                trailing = if (run.requiresInput) "!" else "●",
+                                trailing = if (run.state == AgentRunState.WAITING_FOR_INPUT) "!" else "●",
                             )
                         }
                     }

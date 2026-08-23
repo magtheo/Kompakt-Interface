@@ -3,10 +3,12 @@ package dev.magnor.kompakt.data.fake
 import dev.magnor.kompakt.domain.Action
 import dev.magnor.kompakt.domain.ActionStyle
 import dev.magnor.kompakt.domain.ActionType
-import dev.magnor.kompakt.domain.Agent
+import dev.magnor.kompakt.domain.AgentBackendInfo
+import dev.magnor.kompakt.domain.AgentRole
 import dev.magnor.kompakt.domain.AgentRun
-import dev.magnor.kompakt.domain.AgentRunStatus
-import dev.magnor.kompakt.domain.AgentStatus
+import dev.magnor.kompakt.domain.AgentRunKind
+import dev.magnor.kompakt.domain.AgentRunState
+import dev.magnor.kompakt.domain.AgentsSurface
 import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.CalendarEvent
 import dev.magnor.kompakt.domain.ChatThread
@@ -84,62 +86,73 @@ object FakeData {
         ),
     )
 
-    val agents = listOf(
-        Agent(
-            id = "agent_001", name = "Kompakt audit", status = AgentStatus.RUNNING,
-            description = "Audits spec/code drift across the Kompakt docs",
-            capabilities = listOf("read-repo", "compare-docs"),
-            lastActivity = Instant.parse("2026-08-22T17:48:00Z"),
-            updatedAt = NOW,
+    /** Worker roles offered by the backends (coordinator /v1/agents shape). */
+    val agentRoles = listOf(
+        AgentRole(
+            name = "pi", backend = "warren",
+            description = "Atomic sandboxed runs in a project workspace",
+            steering = "none",
         ),
-        Agent(
-            id = "agent_002", name = "Job Search", status = AgentStatus.IDLE,
-            description = "Monitors job listings and drafts applications",
-            capabilities = listOf("web-read", "draft"),
-            lastActivity = Instant.parse("2026-08-22T15:52:00Z"),
-            updatedAt = NOW,
+        AgentRole(
+            name = "build", backend = "opencode",
+            description = "Resumable coding session on the trusted lane",
+            steering = "live",
         ),
-        Agent(
-            id = "agent_003", name = "Fedora Research", status = AgentStatus.FINISHED,
-            description = "One-shot research worker",
-            capabilities = listOf("web-read"),
-            lastActivity = yesterday,
-            updatedAt = NOW,
+        AgentRole(
+            name = "plan", backend = "opencode",
+            description = "Planning session that asks before acting",
+            steering = "live",
         ),
-        Agent(
-            id = "agent_004", name = "PR Reviewer", status = AgentStatus.WAITING_FOR_INPUT,
-            description = "Reviews PRs, asks before risky suggestions",
-            capabilities = listOf("read-repo", "comment"),
-            lastActivity = Instant.parse("2026-08-22T16:30:00Z"),
-            updatedAt = NOW,
+    )
+
+    /** GET /v1/agents demo payload: backends + roles + default. */
+    val agentSurface = AgentsSurface(
+        backends = mapOf(
+            "warren" to AgentBackendInfo(
+                name = "warren", sandboxed = true, resumable = false,
+                liveSteering = false, commands = false, eventStream = true,
+                projectRegistration = true,
+            ),
+            "opencode" to AgentBackendInfo(
+                name = "opencode", sandboxed = false, resumable = true,
+                liveSteering = true, commands = true, eventStream = true,
+                projectRegistration = false,
+            ),
         ),
+        agents = agentRoles,
+        defaultBackend = "opencode",
     )
 
     val agentRuns = listOf(
         AgentRun(
-            id = "run_001", agentId = "agent_001", title = "Spec drift check",
-            objective = "Check cross-spec drift between docs/ and code",
-            status = AgentRunStatus.RUNNING,
-            startedAt = Instant.parse("2026-08-22T17:41:00Z"),
-            updatedAt = Instant.parse("2026-08-22T17:52:00Z"),
+            id = "run_001", backend = "warren", kind = AgentRunKind.RUN, agent = "pi",
+            state = AgentRunState.RUNNING, projectRef = "kompakt",
+            title = "Spec drift check",
+            prompt = "Check cross-spec drift between docs/ and code",
             resultSummary = "3 findings so far",
+            tokensIn = 12_400, tokensOut = 3_100,
+            createdAt = Instant.parse("2026-08-22T17:41:00Z"),
+            updatedAt = Instant.parse("2026-08-22T17:52:00Z"),
         ),
         AgentRun(
-            id = "run_002", agentId = "agent_004", title = "PR audit",
-            objective = "Audit PR #55 for the task-system integration",
-            status = AgentRunStatus.SUCCEEDED,
-            startedAt = Instant.parse("2026-08-22T14:00:00Z"),
-            updatedAt = Instant.parse("2026-08-22T15:10:00Z"),
+            id = "ses_002", backend = "opencode", kind = AgentRunKind.SESSION, agent = "build",
+            state = AgentRunState.SUCCEEDED,
+            title = "PR audit",
+            prompt = "Audit PR #55 for the task-system integration",
             resultSummary = "LGTM with 2 minor comments. Left review on GitHub.",
+            tokensIn = 40_200, tokensOut = 9_800,
+            createdAt = Instant.parse("2026-08-22T14:00:00Z"),
+            updatedAt = Instant.parse("2026-08-22T15:10:00Z"),
         ),
         AgentRun(
-            id = "run_003", agentId = "agent_002", title = "Course research",
-            objective = "Research summer courses relevant to the degree plan",
-            status = AgentRunStatus.WAITING_FOR_INPUT,
-            startedAt = Instant.parse("2026-08-22T13:20:00Z"),
-            updatedAt = Instant.parse("2026-08-22T16:05:00Z"),
+            id = "ses_003", backend = "opencode", kind = AgentRunKind.SESSION, agent = "plan",
+            state = AgentRunState.WAITING_FOR_INPUT,
+            title = "Course research",
+            prompt = "Research summer courses relevant to the degree plan",
             resultSummary = "Found 3 candidates — need your ranking before applying.",
-            requiresInput = true,
+            tokensIn = 22_000, tokensOut = 4_500,
+            createdAt = Instant.parse("2026-08-22T13:20:00Z"),
+            updatedAt = Instant.parse("2026-08-22T16:05:00Z"),
         ),
     )
 
@@ -202,7 +215,7 @@ object FakeData {
 
     val inboxItems = listOf(
         InboxItem(
-            id = "inbox_001", sourceType = EntityKind.AGENT_RUN, sourceId = "run_003",
+            id = "inbox_001", sourceType = EntityKind.AGENT_RUN, sourceId = "ses_003",
             title = "Agent needs approval", summary = "Course research · ranking",
             timestamp = Instant.parse("2026-08-22T16:05:00Z"), priority = InboxPriority.HIGH,
             actions = listOf(
@@ -217,7 +230,7 @@ object FakeData {
             actions = listOf(Action(ActionType.COMPLETE), Action(ActionType.POSTPONE)),
         ),
         InboxItem(
-            id = "inbox_003", sourceType = EntityKind.AGENT_RUN, sourceId = "run_002",
+            id = "inbox_003", sourceType = EntityKind.AGENT_RUN, sourceId = "ses_002",
             title = "Agent finished", summary = "PR audit",
             timestamp = Instant.parse("2026-08-22T15:10:00Z"), priority = InboxPriority.NORMAL,
             actions = listOf(Action(ActionType.OPEN_RESULT)),

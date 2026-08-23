@@ -9,10 +9,17 @@ import dev.magnor.kompakt.data.repository.OrganizationRepository
 import dev.magnor.kompakt.data.repository.SyncRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
-import dev.magnor.kompakt.domain.ActionType
-import dev.magnor.kompakt.domain.Agent
+import dev.magnor.kompakt.domain.AgentBackendInfo
+import dev.magnor.kompakt.domain.AgentCommand
+import dev.magnor.kompakt.domain.AgentDispatchDraft
+import dev.magnor.kompakt.domain.AgentEvent
 import dev.magnor.kompakt.domain.AgentRun
-import dev.magnor.kompakt.domain.AgentRunStatus
+import dev.magnor.kompakt.domain.AgentRunKind
+import dev.magnor.kompakt.domain.AgentRunResult
+import dev.magnor.kompakt.domain.AgentRunState
+import dev.magnor.kompakt.domain.AgentsSurface
+import dev.magnor.kompakt.domain.RepositoryException
+import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.CaptureProposal
 import dev.magnor.kompakt.domain.CaptureRejectedException
@@ -139,70 +146,143 @@ class FakeChatRepository(
 }
 
 class FakeAgentRepository(
-    private val agents: FakeStore<Agent>,
-    private val runs: FakeStore<AgentRun>,
+    private val surface: MutableStateFlow<AgentsSurface>,
+    private val runs: MutableStateFlow<List<AgentRun>>,
     private val idempotency: IdempotencyRegistry,
-    private val nextId: () -> EntityId,
+    private val nextId: (String) -> EntityId,
     private val now: () -> Instant,
 ) : AgentRepository {
 
-    override fun observeAgents(): Flow<List<Agent>> =
-        agents.observeAll(compareByDescending { it.lastActivity ?: it.updatedAt })
+    /**
+     * Runs are LIVE VIEWS over backends (V-052), not sync entities: no
+     * FakeStore, no revisions, no change-log — ids are backend-native
+     * (`run_…` atomic / `ses_…` session), matching the wire contract.
+     */
+    private val events = mutableMapOf<String, MutableList<AgentEvent>>()
 
-    override fun observeAgent(id: EntityId): Flow<Agent?> = agents.observe(id)
+    override fun observeSurface(): Flow<AgentsSurface> = surface
 
-    override fun observeRuns(agentId: EntityId?): Flow<List<AgentRun>> =
-        runs.observeAll(compareByDescending { it.startedAt }).map { list ->
-            if (agentId == null) list else list.filter { it.agentId == agentId }
+    override fun observeRuns(): Flow<List<AgentRun>> = runs.map { list ->
+        list.sortedByDescending { it.updatedAt ?: Instant.DISTANT_PAST }
+    }
+
+    override fun observeRun(id: String): Flow<AgentRun?> = runs.map { list ->
+        list.firstOrNull { it.id == id }
+    }
+
+    override suspend fun dispatch(draft: AgentDispatchDraft, requestId: RequestId): AgentRun =
+        idempotency.once(requestId) {
+            val backend = draft.backend ?: surface.value.defaultBackend
+                ?: throw RepositoryException("no backend configured")
+            val info = surface.value.backends[backend]
+                ?: throw RepositoryException("unknown backend '$backend'")
+            if (info.projectRegistration && draft.projectRef.isNullOrBlank()) {
+                throw RepositoryException("backend '$backend' requires a project ref")
+            }
+            val kind = if (info.resumable) AgentRunKind.SESSION else AgentRunKind.RUN
+            val run = AgentRun(
+                id = nextId(if (kind == AgentRunKind.SESSION) "ses" else "run"),
+                backend = backend,
+                kind = kind,
+                agent = draft.agent ?: "",
+                state = AgentRunState.QUEUED,
+                projectRef = draft.projectRef,
+                title = draft.prompt.take(60),
+                prompt = draft.prompt,
+                createdAt = now(),
+                updatedAt = now(),
+            )
+            appendEvent(run.id, "dispatched", draft.prompt)
+            runs.value = runs.value + run
+            run
         }
 
-    override fun observeRun(id: EntityId): Flow<AgentRun?> = runs.observe(id)
+    override suspend fun send(runId: String, message: String, requestId: RequestId): AgentRun =
+        idempotency.once(requestId) {
+            val run = find(runId)
+            if (run.kind != AgentRunKind.SESSION) {
+                throw RepositoryException("'$runId' is not a session — cannot send")
+            }
+            if (run.state.isTerminal) {
+                throw RepositoryException("'$runId' already ${run.state.wire}")
+            }
+            appendEvent(runId, "message", message)
+            mutate(run) { it.copy(state = AgentRunState.RUNNING, updatedAt = now()) }
+        }
 
-    override suspend fun getAgent(id: EntityId): Agent? = agents.get(id)
+    override suspend fun steer(runId: String, message: String, requestId: RequestId): SteerOutcome =
+        idempotency.once(requestId) {
+            val run = find(runId)
+            // Capability-honest: mirror the real backends — steering is only
+            // "delivered" when the backend advertises live steering.
+            if (surface.value.backends[run.backend]?.liveSteering == true) {
+                appendEvent(runId, "steer", message)
+                SteerOutcome.DELIVERED
+            } else {
+                SteerOutcome.UNSUPPORTED
+            }
+        }
 
-    override suspend fun getRun(id: EntityId): AgentRun? = runs.get(id)
+    override suspend fun cancel(runId: String, requestId: RequestId) {
+        idempotency.once(requestId) {
+            val run = find(runId)
+            if (!run.state.isTerminal) {
+                appendEvent(runId, "cancelled", null)
+                mutate(run) { it.copy(state = AgentRunState.CANCELLED, updatedAt = now()) }
+            }
+        }
+    }
 
-    override suspend fun requestRun(
-        agentId: EntityId,
-        objective: String,
-        requestId: RequestId,
-    ): AgentRun = idempotency.once(requestId) {
-        require(agents.get(agentId) != null) { "agent '$agentId' not found" }
-        runs.create(
-            AgentRun(
-                id = nextId(),
-                agentId = agentId,
-                title = objective.take(60),
-                objective = objective,
-                status = AgentRunStatus.QUEUED,
-                startedAt = now(),
-                updatedAt = now(),
-            ),
+    override suspend fun result(runId: String): AgentRunResult? {
+        val run = runs.value.firstOrNull { it.id == runId } ?: return null
+        if (run.state != AgentRunState.SUCCEEDED) return null
+        return AgentRunResult(
+            outcome = run.state,
+            summary = run.resultSummary,
+            commitRefs = if (run.backend == "warren") listOf("abc1234") else emptyList(),
+            tokensIn = run.tokensIn,
+            tokensOut = run.tokensOut,
         )
     }
 
-    override suspend fun actOnRun(
-        runId: EntityId,
-        action: ActionType,
-        requestId: RequestId,
-    ): AgentRun = idempotency.once(requestId) {
-        val current = runs.get(runId) ?: throw NoSuchElementException("run '$runId' not found")
-        val nextStatus = when (action) {
-            ActionType.APPROVE -> AgentRunStatus.RUNNING
-            ActionType.REJECT, ActionType.STOP -> AgentRunStatus.STOPPED
-            ActionType.RETRY -> AgentRunStatus.QUEUED
-            ActionType.ARCHIVE -> current.status
-            else -> throw CaptureRejectedException("action '${action.wire}' not valid on agent runs")
-        }
-        runs.mutate(runId, current.revision) {
-            it.copy(
-                status = nextStatus,
-                requiresInput = false,
-                archived = it.archived || action == ActionType.ARCHIVE,
-                revision = it.revision + 1,
-                updatedAt = now(),
+    override suspend fun events(runId: String, since: Long): List<AgentEvent> =
+        events[runId].orEmpty().filter { it.seq > since }.sortedBy { it.seq }
+
+    override suspend fun commands(backend: String): List<AgentCommand> =
+        if (surface.value.backends[backend]?.commands == true) {
+            listOf(
+                AgentCommand(name = "test", description = "Run the test suite"),
+                AgentCommand(name = "compact", description = "Summarize and compact context"),
             )
+        } else {
+            emptyList()
         }
+
+    override suspend fun runCommand(runId: String, command: String, arguments: String, requestId: RequestId): AgentRun =
+        idempotency.once(requestId) {
+            val run = find(runId)
+            if (run.kind != AgentRunKind.SESSION) {
+                throw RepositoryException("commands run inside sessions only")
+            }
+            if (surface.value.backends[run.backend]?.commands != true) {
+                throw RepositoryException("backend '${run.backend}' has no commands")
+            }
+            appendEvent(runId, "command", "/$command $arguments".trim())
+            mutate(run) { it.copy(updatedAt = now()) }
+        }
+
+    private fun find(runId: String): AgentRun = runs.value.firstOrNull { it.id == runId }
+        ?: throw NoSuchElementException("run '$runId' not found")
+
+    private fun mutate(run: AgentRun, transform: (AgentRun) -> AgentRun): AgentRun {
+        val next = transform(run)
+        runs.value = runs.value.map { if (it.id == run.id) next else it }
+        return next
+    }
+
+    private fun appendEvent(runId: String, kind: String, text: String?) {
+        val list = events.getOrPut(runId) { mutableListOf() }
+        list += AgentEvent(seq = list.size.toLong(), kind = kind, text = text)
     }
 }
 
@@ -392,8 +472,8 @@ class FakeTodayRepository(
                 .filter { it.priority != dev.magnor.kompakt.domain.InboxPriority.LOW }
                 .sortedByDescending { it.timestamp },
             agentActivity = runs
-                .filter { it.status == AgentRunStatus.RUNNING ||
-                    it.status == AgentRunStatus.WAITING_FOR_INPUT }
+                .filter { it.state == AgentRunState.RUNNING ||
+                    it.state == AgentRunState.WAITING_FOR_INPUT }
                 .sortedByDescending { it.updatedAt },
             recentNote = noteList.maxByOrNull { it.updatedAt },
         )
@@ -461,16 +541,19 @@ class FakeCaptureRepository(
                     chats.createThread(ChatThreadDraft(title = proposal.title), requestId),
                 )
                 CaptureType.AGENT_REQUEST -> CaptureResult.AgentRequested(
-                    agents.requestRun(ADHOC_AGENT_ID, proposal.title, requestId),
+                    agents.dispatch(
+                        AgentDispatchDraft(
+                            prompt = proposal.text ?: proposal.title,
+                            backend = agents.observeSurface().first().defaultBackend,
+                        ),
+                        "$requestId#run",
+                    ),
                 )
                 CaptureType.UNKNOWN -> throw CaptureRejectedException("unknown capture type")
             }
         }
 
     companion object {
-        /** Job Search agent hosts ad-hoc requests in the fake world. */
-        const val ADHOC_AGENT_ID = "agent_002"
-
         private val TASK_HINTS = listOf(
             "call ", "buy ", "send ", "review ", "fix ", "renew ", "book ",
             "submit ", "remind", "check ", "pay ", "email ", "write ", "order ",
