@@ -193,6 +193,20 @@ class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
         return ChatExchange(user = envelope.message, assistant = envelope.assistantMessage)
     }
 
+    override suspend fun truncate(chatId: EntityId, keepThrough: EntityId?, requestId: RequestId) {
+        @Serializable
+        data class TruncateBody(
+            @SerialName("request_id") val requestId: RequestId,
+            @SerialName("keep_through") val keepThrough: EntityId? = null,
+        )
+        // kept/deleted counts are informational; errors surface as exceptions.
+        api.post(
+            "/v1/chats/$chatId/truncate",
+            KompaktJson.encodeToString(TruncateBody(requestId, keepThrough)),
+            requestId,
+        )
+    }
+
     @Serializable
     private data class ChatEnvelope(val chat: ChatThread)
 
