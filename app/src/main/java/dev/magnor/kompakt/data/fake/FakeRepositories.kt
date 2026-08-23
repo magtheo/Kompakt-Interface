@@ -20,6 +20,7 @@ import dev.magnor.kompakt.domain.CaptureResult
 import dev.magnor.kompakt.domain.CaptureType
 import dev.magnor.kompakt.domain.CapabilitySet
 import dev.magnor.kompakt.domain.ChangePage
+import dev.magnor.kompakt.domain.ChatExchange
 import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.EntityId
@@ -90,7 +91,7 @@ class FakeChatRepository(
             )
         }
 
-    override suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): Message =
+    override suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): ChatExchange =
         idempotency.once(requestId) {
             require(threads.get(chatId) != null) { "chat '$chatId' not found" }
             // Lifecycle: PENDING creation → SENT acknowledgement (protocol §17 shape).
@@ -112,6 +113,18 @@ class FakeChatRepository(
                     updatedAt = now(),
                 )
             }
+            // Demo stand-in for the server-side LLM reply (real one arrives
+            // via the coordinator's Hermes proxy in live mode).
+            val reply = messages.create(
+                Message(
+                    id = nextId(),
+                    chatId = chatId,
+                    role = MessageRole.ASSISTANT,
+                    content = "Demo reply — enroll and connect for real answers.",
+                    createdAt = now(),
+                    updatedAt = now(),
+                ),
+            )
             threads.get(chatId)?.let { thread ->
                 threads.mutate(thread.id, thread.revision) {
                     it.copy(
@@ -121,7 +134,7 @@ class FakeChatRepository(
                     )
                 }
             }
-            sent
+            ChatExchange(user = sent, assistant = reply)
         }
 }
 

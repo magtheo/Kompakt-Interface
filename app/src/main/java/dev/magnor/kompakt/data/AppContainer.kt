@@ -41,6 +41,7 @@ import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.CapabilitySet
 import dev.magnor.kompakt.domain.ChangePage
+import dev.magnor.kompakt.domain.ChatExchange
 import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.CaptureProposal
@@ -314,7 +315,7 @@ class AppContainer(
         override suspend fun getThread(id: EntityId): ChatThread? = cur().getThread(id)
         override suspend fun createThread(draft: ChatThreadDraft, requestId: RequestId): ChatThread =
             cur().createThread(draft, requestId)
-        override suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): Message =
+        override suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): ChatExchange =
             cur().sendMessage(chatId, text, requestId)
     }
 

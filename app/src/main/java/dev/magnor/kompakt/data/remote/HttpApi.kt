@@ -53,13 +53,19 @@ class HttpApi(
     suspend fun get(path: String, query: Map<String, String?> = emptyMap()): String =
         execute(Request.Builder().get().url(url(path, query)).build())
 
-    /** Raw POST with a JSON body. */
-    suspend fun post(path: String, bodyJson: String, requestId: String? = null): String {
+    /** Raw POST with a JSON body. [timeoutSeconds] overrides the default
+     *  call timeout for endpoints with long-latency server work (chat LLM). */
+    suspend fun post(
+        path: String,
+        bodyJson: String,
+        requestId: String? = null,
+        timeoutSeconds: Long? = null,
+    ): String {
         val builder = Request.Builder()
             .post(bodyJson.toRequestBody("application/json".toMediaType()))
             .url(url(path))
         requestId?.let { builder.header("X-Request-Id", it) }
-        return execute(builder.build())
+        return execute(builder.build(), timeoutSeconds)
     }
 
     suspend inline fun <reified T> decode(
@@ -90,16 +96,20 @@ class HttpApi(
         return builder.build()
     }
 
-    private suspend fun execute(request: Request): String = withContext(Dispatchers.IO) {
-        val builder = request.newBuilder()
-            .header("Accept", "application/json")
-        tokenProvider()?.let { builder.header("Authorization", "Bearer $it") }
-        val tagged = builder.build()
-        val response: Response = try {
-            client.newCall(tagged).execute()
-        } catch (e: IOException) {
-            throw OfflineException(e)
-        }
+    private suspend fun execute(request: Request, timeoutSeconds: Long? = null): String =
+        withContext(Dispatchers.IO) {
+            val callClient = if (timeoutSeconds != null) {
+                client.newBuilder().callTimeout(timeoutSeconds, TimeUnit.SECONDS).build()
+            } else client
+            val builder = request.newBuilder()
+                .header("Accept", "application/json")
+            tokenProvider()?.let { builder.header("Authorization", "Bearer $it") }
+            val tagged = builder.build()
+            val response: Response = try {
+                callClient.newCall(tagged).execute()
+            } catch (e: IOException) {
+                throw OfflineException(e)
+            }
         response.use {
             val body = it.body?.string().orEmpty()
             when {

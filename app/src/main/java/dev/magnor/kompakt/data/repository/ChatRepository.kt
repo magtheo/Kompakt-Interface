@@ -1,5 +1,6 @@
 package dev.magnor.kompakt.data.repository
 
+import dev.magnor.kompakt.domain.ChatExchange
 import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.EntityId
@@ -17,8 +18,9 @@ interface ChatRepository {
     suspend fun createThread(draft: ChatThreadDraft, requestId: RequestId): ChatThread
 
     /**
-     * Submit a user message. Returns the acknowledged message (status SENT);
-     * while offline the message is queued PENDING instead (protocol §17).
+     * Submit a user message. Returns the acknowledged exchange (user message
+     * SENT + assistant reply, server-generated, protocol §17); the reply can
+     * take tens of seconds — callers must tolerate the latency.
      */
-    suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): Message
+    suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): ChatExchange
 }
