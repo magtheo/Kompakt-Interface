@@ -8,6 +8,7 @@ import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.data.repository.OrganizationRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.domain.AgentRun
+import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.InboxItem
@@ -234,10 +235,9 @@ class ItemDetailViewModel(
                 source = note.sourceType?.let { "from ${it.wire} ${note.sourceId ?: ""}".trim() },
             )
             run != null -> ItemUiState(
-                found = true, kind = "Agent run", title = run.title,
-                subtitle = run.objective, status = run.status.wire,
-                revision = run.revision,
-                source = run.agentId,
+                found = true, kind = "Agent run", title = run.displayTitle,
+                subtitle = run.prompt, status = run.state.wire,
+                source = "${run.agent} @ ${run.backend}",
             )
             inboxItem != null -> ItemUiState(
                 found = true, kind = "Inbox", title = inboxItem.title,
@@ -253,4 +253,4 @@ class ItemDetailViewModel(
 
 /** Agent activity helper for screens that show runs compactly. */
 fun AgentRun.isWaitingForInput(): Boolean =
-    status == dev.magnor.kompakt.domain.AgentRunStatus.WAITING_FOR_INPUT
+    state == AgentRunState.WAITING_FOR_INPUT

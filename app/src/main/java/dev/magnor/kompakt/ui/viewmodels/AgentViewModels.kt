@@ -6,71 +6,188 @@ import dev.magnor.kompakt.data.repository.AgentRepository
 import dev.magnor.kompakt.data.repository.ChatRepository
 import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
-import dev.magnor.kompakt.domain.ActionType
-import dev.magnor.kompakt.domain.Agent
+import dev.magnor.kompakt.domain.AgentBackendInfo
+import dev.magnor.kompakt.domain.AgentCommand
+import dev.magnor.kompakt.domain.AgentDispatchDraft
+import dev.magnor.kompakt.domain.AgentEvent
+import dev.magnor.kompakt.domain.AgentRole
 import dev.magnor.kompakt.domain.AgentRun
+import dev.magnor.kompakt.domain.AgentRunResult
+import dev.magnor.kompakt.domain.AgentsSurface
 import dev.magnor.kompakt.domain.ChatThreadDraft
-import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.NoteDraft
 import dev.magnor.kompakt.domain.RequestId
+import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.TaskDraft
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 
-/** Agents list — a process manager, not a chat history. */
+/**
+ * Phase 8 (V-052): agents are a process manager over swappable backends.
+ * The surface (backends + roles + capabilities) drives what the UI offers —
+ * the app never assumes support a backend doesn't advertise.
+ */
 class AgentsListViewModel(
     agentRepository: AgentRepository,
     val now: Instant,
 ) : ViewModel() {
-    val agents: StateFlow<List<Agent>> = agentRepository.observeAgents()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val surface: StateFlow<AgentsSurface> = agentRepository.observeSurface()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AgentsSurface())
 
     val runs: StateFlow<List<AgentRun>> = agentRepository.observeRuns()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 }
 
-/** One persistent worker with its recent runs. */
+/**
+ * One worker role on one backend — a live view, not a stored entity.
+ * Dispatch is the only write; the backend owns the resulting run.
+ */
 class AgentDetailViewModel(
-    agentRepository: AgentRepository,
-    agentId: EntityId,
+    private val agentRepository: AgentRepository,
+    backend: String,
+    agentName: String,
+    private val newRequestId: () -> RequestId,
 ) : ViewModel() {
-    val agent: StateFlow<Agent?> = agentRepository.observeAgent(agentId)
+
+    val role: StateFlow<AgentRole?> = agentRepository.observeSurface()
+        .map { surface -> surface.agents.firstOrNull { it.backend == backend && it.name == agentName } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val runs: StateFlow<List<AgentRun>> = agentRepository.observeRuns(agentId)
+    val backendInfo: StateFlow<AgentBackendInfo?> = agentRepository.observeSurface()
+        .map { surface -> surface.backends[backend] }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val runs: StateFlow<List<AgentRun>> = agentRepository.observeRuns()
+        .map { list -> list.filter { it.backend == backend && it.agent == agentName } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _feedback = MutableStateFlow<String?>(null)
+    val feedback: StateFlow<String?> = _feedback.asStateFlow()
+
+    fun dispatch(prompt: String, projectRef: String?) {
+        if (prompt.isBlank()) return
+        viewModelScope.launch {
+            runCatching {
+                agentRepository.dispatch(
+                    AgentDispatchDraft(
+                        prompt = prompt.trim(),
+                        backend = role.value?.backend,
+                        agent = role.value?.name,
+                        projectRef = projectRef?.trim()?.takeIf { it.isNotBlank() },
+                    ),
+                    newRequestId(),
+                )
+            }.onSuccess { run ->
+                _feedback.value = "Dispatched ${run.kind.wire} ${run.id}"
+            }.onFailure { e ->
+                _feedback.value = "Dispatch failed: ${e.message}"
+            }
+        }
+    }
 }
 
 /**
- * One agent execution. The D003 transitions (Discuss / Create task / Save
- * note / Archive) are explicit user actions routed through the owning
- * repositories — never silent conversions.
+ * One execution: process-manager controls (send/steer/cancel/command,
+ * capability-gated) plus the explicit D003 transitions routed through the
+ * owning repositories — never silent conversions.
  */
 class AgentRunDetailViewModel(
     private val agentRepository: AgentRepository,
     private val taskRepository: TaskRepository,
     private val noteRepository: NoteRepository,
     private val chatRepository: ChatRepository,
-    private val runId: EntityId,
+    private val runId: String,
     private val newRequestId: () -> RequestId,
 ) : ViewModel() {
 
     val run: StateFlow<AgentRun?> = agentRepository.observeRun(runId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    val backendInfo: StateFlow<AgentBackendInfo?> = combine(
+        agentRepository.observeRun(runId),
+        agentRepository.observeSurface(),
+    ) { run, surface -> run?.backend?.let { surface.backends[it] } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Slash-commands when this run's backend advertises them. */
+    val commands: StateFlow<List<AgentCommand>> = combine(
+        agentRepository.observeRun(runId),
+        agentRepository.observeSurface(),
+    ) { run, surface -> run?.backend?.takeIf { surface.backends[it]?.commands == true } }
+        .distinctUntilChanged()
+        .map { backend ->
+            backend?.let { runCatching { agentRepository.commands(it) }.getOrDefault(emptyList()) }
+                ?: emptyList()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _result = MutableStateFlow<AgentRunResult?>(null)
+    val result: StateFlow<AgentRunResult?> = _result.asStateFlow()
+
+    private val _events = MutableStateFlow<List<AgentEvent>>(emptyList())
+    val events: StateFlow<List<AgentEvent>> = _events.asStateFlow()
+
     private val _feedback = MutableStateFlow<String?>(null)
     val feedback: StateFlow<String?> = _feedback.asStateFlow()
+
+    init {
+        refreshEvidence()
+    }
+
+    /** Pull the durable evidence (result + event stream) once, on demand. */
+    fun refreshEvidence() {
+        viewModelScope.launch {
+            runCatching { agentRepository.result(runId) }
+                .onSuccess { _result.value = it }
+                .onFailure { _result.value = null }
+            runCatching { agentRepository.events(runId) }
+                .onSuccess { _events.value = it }
+        }
+    }
+
+    fun send(message: String) = action("Sent — session running") {
+        agentRepository.send(runId, message, newRequestId())
+    }
+
+    fun steer(message: String) {
+        if (message.isBlank()) return
+        viewModelScope.launch {
+            runCatching { agentRepository.steer(runId, message.trim(), newRequestId()) }
+                .onSuccess { outcome ->
+                    _feedback.value = when (outcome) {
+                        SteerOutcome.DELIVERED -> "Steer delivered"
+                        SteerOutcome.QUEUED -> "Steer queued for next turn"
+                        SteerOutcome.UNSUPPORTED -> "Steering not supported by this backend"
+                        SteerOutcome.UNKNOWN -> "Steer outcome unknown"
+                    }
+                }
+                .onFailure { e -> _feedback.value = "Steer failed: ${e.message}" }
+        }
+    }
+
+    fun cancel() = action("Cancelled") {
+        agentRepository.cancel(runId, newRequestId())
+    }
+
+    fun runCommand(command: AgentCommand) = action("Command sent: /${command.name}") {
+        agentRepository.runCommand(runId, command.name, "", newRequestId())
+    }
+
+    // ---- D003: explicit transitions (routed through owning repos) ----
 
     fun createTask() = transition { run ->
         val task = taskRepository.createTask(
             TaskDraft(
-                title = "Follow up: ${run.title}",
+                title = "Follow up: ${run.displayTitle}",
                 sourceType = EntityKind.AGENT_RUN,
                 sourceId = run.id,
             ),
@@ -83,8 +200,8 @@ class AgentRunDetailViewModel(
         noteRepository.createNote(
             NoteDraft(
                 text = buildString {
-                    appendLine(run.title)
-                    appendLine("Status: ${run.status.wire}")
+                    appendLine(run.displayTitle)
+                    appendLine("Status: ${run.state.wire} (${run.backend}/${run.agent})")
                     run.resultSummary?.let { appendLine(it) }
                 }.trim(),
                 sourceType = EntityKind.AGENT_RUN,
@@ -96,13 +213,18 @@ class AgentRunDetailViewModel(
     }
 
     fun discussInChat() = transition { run ->
-        chatRepository.createThread(ChatThreadDraft(title = run.title), newRequestId())
-        "Chat created: ${run.title}"
+        chatRepository.createThread(ChatThreadDraft(title = run.displayTitle), newRequestId())
+        "Chat created: ${run.displayTitle}"
     }
 
-    fun archive() = transition { run ->
-        agentRepository.actOnRun(run.id, ActionType.ARCHIVE, newRequestId())
-        "Archived"
+    // ---- plumbing ----
+
+    private fun action(label: String, block: suspend () -> Any?) {
+        viewModelScope.launch {
+            runCatching { block() }
+                .onSuccess { _feedback.value = label; refreshEvidence() }
+                .onFailure { e -> _feedback.value = "Failed: ${e.message}" }
+        }
     }
 
     private fun transition(label: suspend (AgentRun) -> String) {
@@ -110,7 +232,7 @@ class AgentRunDetailViewModel(
             val run = run.value ?: return@launch
             runCatching { label(run) }
                 .onSuccess { _feedback.value = it }
-                .onFailure { _feedback.value = "Failed: ${it.message}" }
+                .onFailure { e -> _feedback.value = "Failed: ${e.message}" }
         }
     }
 }

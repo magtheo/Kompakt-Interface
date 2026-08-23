@@ -35,9 +35,13 @@ import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
 import dev.magnor.kompakt.data.security.InMemorySecretVault
 import dev.magnor.kompakt.data.security.SecretVault
-import dev.magnor.kompakt.domain.ActionType
-import dev.magnor.kompakt.domain.Agent
+import dev.magnor.kompakt.domain.AgentCommand
+import dev.magnor.kompakt.domain.AgentDispatchDraft
+import dev.magnor.kompakt.domain.AgentEvent
 import dev.magnor.kompakt.domain.AgentRun
+import dev.magnor.kompakt.domain.AgentRunResult
+import dev.magnor.kompakt.domain.AgentsSurface
+import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.CapabilitySet
 import dev.magnor.kompakt.domain.ChangePage
@@ -129,8 +133,6 @@ class AppContainer(
 
     private val threadStore = FakeStore<ChatThread>(EntityKind.CHAT, changeLog, now)
     private val messageStore = FakeStore<Message>(EntityKind.MESSAGE, changeLog, now)
-    private val agentStore = FakeStore<Agent>(EntityKind.AGENT, changeLog, now)
-    private val runStore = FakeStore<AgentRun>(EntityKind.AGENT_RUN, changeLog, now)
     private val taskStore = FakeStore<Task>(EntityKind.TASK, changeLog, now)
     private val noteStore = FakeStore<Note>(EntityKind.NOTE, changeLog, now)
     private val projectStore = FakeStore<Project>(EntityKind.PROJECT, changeLog, now)
@@ -143,9 +145,12 @@ class AppContainer(
         threads = threadStore, messages = messageStore,
         idempotency = idempotency, nextId = { nextId("thread") }, now = now,
     )
+    private val fakeRuns = MutableStateFlow(FakeData.agentRuns.toList())
+
     private val fakeAgents = FakeAgentRepository(
-        agents = agentStore, runs = runStore,
-        idempotency = idempotency, nextId = { nextId("run") }, now = now,
+        surface = MutableStateFlow(FakeData.agentSurface),
+        runs = fakeRuns,
+        idempotency = idempotency, nextId = ::nextId, now = now,
     )
     private val fakeTasks = FakeTaskRepository(
         tasks = taskStore, idempotency = idempotency, nextId = { nextId("task") }, now = now,
@@ -321,16 +326,21 @@ class AppContainer(
 
     private inner class SwitchAgent : AgentRepository {
         private fun cur(): AgentRepository = remoteStack?.agents ?: fakeAgents
-        override fun observeAgents(): Flow<List<Agent>> = cur().observeAgents()
-        override fun observeAgent(id: EntityId): Flow<Agent?> = cur().observeAgent(id)
-        override fun observeRuns(agentId: EntityId?): Flow<List<AgentRun>> = cur().observeRuns(agentId)
-        override fun observeRun(id: EntityId): Flow<AgentRun?> = cur().observeRun(id)
-        override suspend fun getAgent(id: EntityId): Agent? = cur().getAgent(id)
-        override suspend fun getRun(id: EntityId): AgentRun? = cur().getRun(id)
-        override suspend fun requestRun(agentId: EntityId, objective: String, requestId: RequestId): AgentRun =
-            cur().requestRun(agentId, objective, requestId)
-        override suspend fun actOnRun(runId: EntityId, action: ActionType, requestId: RequestId): AgentRun =
-            cur().actOnRun(runId, action, requestId)
+        override fun observeSurface(): Flow<AgentsSurface> = cur().observeSurface()
+        override fun observeRuns(): Flow<List<AgentRun>> = cur().observeRuns()
+        override fun observeRun(id: String): Flow<AgentRun?> = cur().observeRun(id)
+        override suspend fun dispatch(draft: AgentDispatchDraft, requestId: RequestId): AgentRun =
+            cur().dispatch(draft, requestId)
+        override suspend fun send(runId: String, message: String, requestId: RequestId): AgentRun =
+            cur().send(runId, message, requestId)
+        override suspend fun steer(runId: String, message: String, requestId: RequestId): SteerOutcome =
+            cur().steer(runId, message, requestId)
+        override suspend fun cancel(runId: String, requestId: RequestId) = cur().cancel(runId, requestId)
+        override suspend fun result(runId: String): AgentRunResult? = cur().result(runId)
+        override suspend fun events(runId: String, since: Long): List<AgentEvent> = cur().events(runId, since)
+        override suspend fun commands(backend: String): List<AgentCommand> = cur().commands(backend)
+        override suspend fun runCommand(runId: String, command: String, arguments: String, requestId: RequestId): AgentRun =
+            cur().runCommand(runId, command, arguments, requestId)
     }
 
     private inner class SwitchTask : TaskRepository {
@@ -398,8 +408,6 @@ class AppContainer(
     init {
         threadStore.seed(FakeData.chatThreads)
         messageStore.seed(FakeData.chatMessages)
-        agentStore.seed(FakeData.agents)
-        runStore.seed(FakeData.agentRuns)
         taskStore.seed(FakeData.tasks)
         noteStore.seed(FakeData.notes)
         projectStore.seed(FakeData.projects)

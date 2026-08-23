@@ -167,17 +167,52 @@ class DomainModelTest {
         assertTrue(first.id !in after.tasks.map { it.id })
     }
 
-    // ---- D003: agent-run transitions are explicit ----
+    // ---- Phase 8: agents surface is capability-driven (V-052) ----
 
     @Test
-    fun `agent run archive is explicit and idempotent`() = runTest {
-        val agents = container.agentRepository.observeAgents().first()
-        val agent = agents.first()
-        val run = container.agentRepository.requestRun(agent.id, "Test objective", "req-run-1")
-        assertEquals(AgentRunStatus.QUEUED, run.status)
-        val archived = container.agentRepository.actOnRun(run.id, ActionType.ARCHIVE, "req-arch-1")
-        assertTrue(archived.archived)
-        val replay = container.agentRepository.actOnRun(run.id, ActionType.ARCHIVE, "req-arch-1")
-        assertEquals(archived.revision, replay.revision)
+    fun `agent dispatch honors backend capabilities and replays idempotently`() = runTest {
+        val surface = container.agentRepository.observeSurface().first()
+        val role = surface.agents.first { it.backend == "warren" }
+
+        // Warren registers projects → a run without a project ref is rejected.
+        val rejected = runCatching {
+            container.agentRepository.dispatch(
+                AgentDispatchDraft(prompt = "Audit docs", backend = role.backend, agent = role.name),
+                "req-run-1",
+            )
+        }
+        assertTrue(rejected.isFailure)
+
+        val run = container.agentRepository.dispatch(
+            AgentDispatchDraft(
+                prompt = "Audit docs", backend = role.backend,
+                agent = role.name, projectRef = "kompakt",
+            ),
+            "req-run-2",
+        )
+        assertEquals(AgentRunKind.RUN, run.kind) // warren is atomic, not resumable
+        assertEquals(AgentRunState.QUEUED, run.state)
+
+        // Replay with the same request id creates exactly one run.
+        val replay = container.agentRepository.dispatch(
+            AgentDispatchDraft(
+                prompt = "Audit docs", backend = role.backend,
+                agent = role.name, projectRef = "kompakt",
+            ),
+            "req-run-2",
+        )
+        assertEquals(run.id, replay.id)
+
+        // Steering is honest: neither fake backend advertises live steering.
+        assertEquals(
+            SteerOutcome.UNSUPPORTED,
+            container.agentRepository.steer(run.id, "faster", "req-steer-1"),
+        )
+
+        // Cancel is terminal-safe and repeatable.
+        container.agentRepository.cancel(run.id, "req-cancel-1")
+        assertEquals(AgentRunState.CANCELLED, container.agentRepository.observeRun(run.id).first()?.state)
+        container.agentRepository.cancel(run.id, "req-cancel-2")
+        assertEquals(AgentRunState.CANCELLED, container.agentRepository.observeRun(run.id).first()?.state)
     }
 }

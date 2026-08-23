@@ -9,71 +9,141 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 
 /**
- * A persistent worker/role: Job Search Agent, PR Reviewer, …
- * Status vocabulary follows the Agents surface UI (running / idle /
- * waiting for input / finished).
+ * Phase 8 agent surface, aligned to the coordinator's /v1 agents contract
+ * (V-052). Agents are LIVE VIEWS over swappable backends (D025), not sync
+ * entities: a role is identified by (name, backend) — backends own the ids.
  */
-@Serializable(with = AgentStatus.Serializer::class)
-enum class AgentStatus(val wire: String) {
-    RUNNING("running"),
-    IDLE("idle"),
-    WAITING_FOR_INPUT("waiting_for_input"),
-    FINISHED("finished"),
-    UNKNOWN("unknown");
 
-    object Serializer : SafeEnumSerializer<AgentStatus>(UNKNOWN, entries, AgentStatus::wire)
-}
-
+/** What an agent backend actually honors (coordinator BackendCapabilities). */
 @Serializable
-data class Agent(
-    override val id: EntityId,
+data class AgentBackendInfo(
     val name: String,
-    val status: AgentStatus = AgentStatus.IDLE,
-    val description: String = "",
-    val capabilities: List<String> = emptyList(),
-    @SerialName("last_activity")
-    val lastActivity: Instant? = null,
-    override val revision: Long = 1,
-    @SerialName("updated_at")
-    override val updatedAt: Instant,
-) : SyncEntity
+    val sandboxed: Boolean = false,
+    val resumable: Boolean = false,
+    @SerialName("live_steering") val liveSteering: Boolean = false,
+    val commands: Boolean = false,
+    @SerialName("event_stream") val eventStream: Boolean = false,
+    @SerialName("project_registration") val projectRegistration: Boolean = false,
+)
 
 /**
- * One concrete execution of an agent. Status blueprint follows the
- * Executor's JobSubmit/JobStatus schema pattern (queued → running →
- * terminal), plus WAITING_FOR_INPUT for approval gates.
+ * A worker role offered by a backend (Warren `pi`, OpenCode `build`…).
+ * Roles have no server-side id — the pair (name, backend) is the key.
  */
-@Serializable(with = AgentRunStatus.Serializer::class)
-enum class AgentRunStatus(val wire: String) {
+@Serializable
+data class AgentRole(
+    val name: String,
+    val description: String = "",
+    /** spawn_only | live | none (role-level steering vocabulary). */
+    val steering: String = "none",
+    val backend: String,
+)
+
+/** GET /v1/agents summary — the whole surface in one read. */
+@Serializable
+data class AgentsSurface(
+    val backends: Map<String, AgentBackendInfo> = emptyMap(),
+    val agents: List<AgentRole> = emptyList(),
+    @SerialName("default_backend") val defaultBackend: String? = null,
+) {
+    fun backendOf(role: AgentRole): AgentBackendInfo? = backends[role.backend]
+}
+
+/** Run vs. session execution kinds (port ExecutionKind). */
+@Serializable(with = AgentRunKind.Serializer::class)
+enum class AgentRunKind(val wire: String) {
+    RUN("run"),
+    SESSION("session"),
+    UNKNOWN("unknown");
+
+    object Serializer : SafeEnumSerializer<AgentRunKind>(UNKNOWN, entries, AgentRunKind::wire)
+}
+
+/** Execution state vocabulary (port ExecutionState, wire-safe). */
+@Serializable(with = AgentRunState.Serializer::class)
+enum class AgentRunState(val wire: String) {
     QUEUED("queued"),
     RUNNING("running"),
     WAITING_FOR_INPUT("waiting_for_input"),
     SUCCEEDED("succeeded"),
     FAILED("failed"),
-    STOPPED("stopped"),
+    CANCELLED("cancelled"),
+    IDLE("idle"),
     UNKNOWN("unknown");
 
-    object Serializer : SafeEnumSerializer<AgentRunStatus>(UNKNOWN, entries, AgentRunStatus::wire)
+    val isTerminal: Boolean
+        get() = this == SUCCEEDED || this == FAILED || this == CANCELLED
+
+    object Serializer : SafeEnumSerializer<AgentRunState>(UNKNOWN, entries, AgentRunState::wire)
 }
 
+/**
+ * One execution: a Warren run (atomic, sandboxed) or an OpenCode session
+ * (resumable, trusted lane). `id` is the BACKEND-native id (`run_…`/`ses_…`).
+ */
 @Serializable
 data class AgentRun(
-    override val id: EntityId,
-    @SerialName("agent_id")
-    val agentId: EntityId,
-    val title: String,
-    val objective: String,
-    val status: AgentRunStatus = AgentRunStatus.QUEUED,
-    @SerialName("started_at")
-    val startedAt: Instant,
-    @SerialName("updated_at")
-    override val updatedAt: Instant = startedAt,
-    override val revision: Long = 1,
-    @SerialName("result_summary")
-    val resultSummary: String? = null,
-    @SerialName("requires_input")
-    val requiresInput: Boolean = false,
-    @SerialName("project_id")
-    val projectId: EntityId? = null,
-    val archived: Boolean = false,
-) : SyncEntity
+    val id: String,
+    val backend: String,
+    val kind: AgentRunKind = AgentRunKind.UNKNOWN,
+    val agent: String = "",
+    val state: AgentRunState = AgentRunState.UNKNOWN,
+    @SerialName("project_ref") val projectRef: String? = null,
+    val title: String? = null,
+    val prompt: String? = null,
+    @SerialName("result_summary") val resultSummary: String? = null,
+    @SerialName("tokens_in") val tokensIn: Long? = null,
+    @SerialName("tokens_out") val tokensOut: Long? = null,
+    @SerialName("created_at") val createdAt: Instant? = null,
+    @SerialName("updated_at") val updatedAt: Instant? = null,
+) {
+    /** Display title: explicit title, else the prompt, else the id. */
+    val displayTitle: String get() = title ?: prompt?.takeIf { it.isNotBlank() } ?: id
+}
+
+/** Honest steering outcome (port SteerOutcome — never silently pretend). */
+@Serializable(with = SteerOutcome.Serializer::class)
+enum class SteerOutcome(val wire: String) {
+    DELIVERED("delivered"),
+    QUEUED("queued"),
+    UNSUPPORTED("unsupported"),
+    UNKNOWN("unknown");
+
+    object Serializer : SafeEnumSerializer<SteerOutcome>(UNKNOWN, entries, SteerOutcome::wire)
+}
+
+/** Evidence event from a run's durable stream (payload kept as JSON text). */
+@Serializable
+data class AgentEvent(
+    val seq: Long,
+    val kind: String,
+    val text: String? = null,
+)
+
+/** Full result payload (port AgentResult — commit/salvage evidence). */
+@Serializable
+data class AgentRunResult(
+    val outcome: AgentRunState = AgentRunState.UNKNOWN,
+    val summary: String? = null,
+    val branch: String? = null,
+    @SerialName("commit_refs") val commitRefs: List<String> = emptyList(),
+    @SerialName("salvage_ref") val salvageRef: String? = null,
+    @SerialName("tokens_in") val tokensIn: Long? = null,
+    @SerialName("tokens_out") val tokensOut: Long? = null,
+)
+
+/** A backend slash-command (OpenCode command surface). */
+@Serializable
+data class AgentCommand(
+    val name: String,
+    val description: String = "",
+    val template: String? = null,
+)
+
+/** New-execution request. Backend optional → default_backend; Warren needs a projectRef. */
+data class AgentDispatchDraft(
+    val prompt: String,
+    val backend: String? = null,
+    val agent: String? = null,
+    val projectRef: String? = null,
+)

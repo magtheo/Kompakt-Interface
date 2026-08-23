@@ -9,9 +9,13 @@ import dev.magnor.kompakt.data.repository.OrganizationRepository
 import dev.magnor.kompakt.data.repository.SyncRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
-import dev.magnor.kompakt.domain.ActionType
-import dev.magnor.kompakt.domain.Agent
+import dev.magnor.kompakt.domain.AgentCommand
+import dev.magnor.kompakt.domain.AgentDispatchDraft
+import dev.magnor.kompakt.domain.AgentEvent
 import dev.magnor.kompakt.domain.AgentRun
+import dev.magnor.kompakt.domain.AgentRunResult
+import dev.magnor.kompakt.domain.AgentsSurface
+import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.CapabilitySet
 import dev.magnor.kompakt.domain.ChangePage
@@ -44,6 +48,9 @@ import kotlinx.datetime.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * HTTP-backed repositories against the /v1/ contract (T-004).
@@ -197,22 +204,97 @@ class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
 }
 
 class RemoteAgentRepository(private val api: HttpApi) : AgentRepository {
-    override fun observeAgents(): Flow<List<Agent>> = flow {
-        emit(api.decodeList("/v1/agents", "agents"))
+    override fun observeSurface(): Flow<AgentsSurface> = flow {
+        emit(api.decode("/v1/agents"))
     }
-    override fun observeAgent(id: EntityId): Flow<Agent?> =
-        observeAgents().map { list -> list.firstOrNull { it.id == id } }
-    override fun observeRuns(agentId: EntityId?): Flow<List<AgentRun>> = flow {
+
+    override fun observeRuns(): Flow<List<AgentRun>> = flow {
         emit(api.decodeList("/v1/agent-runs", "agent_runs"))
     }
-    override fun observeRun(id: EntityId): Flow<AgentRun?> =
-        observeRuns().map { list -> list.firstOrNull { it.id == id } }
-    override suspend fun getAgent(id: EntityId): Agent? = null
-    override suspend fun getRun(id: EntityId): AgentRun? = null
-    override suspend fun requestRun(agentId: EntityId, objective: String, requestId: RequestId): AgentRun =
-        writesLandInPhase6("starting agent runs")
-    override suspend fun actOnRun(runId: EntityId, action: ActionType, requestId: RequestId): AgentRun =
-        writesLandInPhase6("agent actions")
+
+    override fun observeRun(id: String): Flow<AgentRun?> = observeRuns().map { list ->
+        list.firstOrNull { it.id == id }
+    }
+
+    override suspend fun dispatch(draft: AgentDispatchDraft, requestId: RequestId): AgentRun {
+        @Serializable
+        data class DispatchBody(
+            val prompt: String,
+            val backend: String? = null,
+            val agent: String? = null,
+            @SerialName("project_ref") val projectRef: String? = null,
+        )
+        val body = DispatchBody(draft.prompt, draft.backend, draft.agent, draft.projectRef)
+        return api.post("/v1/agents/dispatch", KompaktJson.encodeToString(body))
+            .let { KompaktJson.decodeFromString<RunEnvelope>(it).agentRun }
+    }
+
+    override suspend fun send(runId: String, message: String, requestId: RequestId): AgentRun {
+        @Serializable
+        data class SendBody(val message: String)
+        val body = SendBody(message)
+        return api.post("/v1/agent-runs/$runId/send", KompaktJson.encodeToString(body))
+            .let { KompaktJson.decodeFromString<RunEnvelope>(it).agentRun }
+    }
+
+    override suspend fun steer(runId: String, message: String, requestId: RequestId): SteerOutcome {
+        @Serializable
+        data class SteerBody(val message: String)
+        @Serializable
+        data class SteerEnvelope(val outcome: SteerOutcome)
+        return api.post("/v1/agent-runs/$runId/steer", KompaktJson.encodeToString(SteerBody(message)))
+            .let { KompaktJson.decodeFromString<SteerEnvelope>(it).outcome }
+    }
+
+    override suspend fun cancel(runId: String, requestId: RequestId) {
+        @Serializable
+        data class CancelBody(val reason: String? = null)
+        api.post("/v1/agent-runs/$runId/cancel", KompaktJson.encodeToString(CancelBody()))
+    }
+
+    override suspend fun result(runId: String): AgentRunResult? = try {
+        @Serializable
+        data class ResultEnvelope(val result: AgentRunResult)
+        api.decode<ResultEnvelope>("/v1/agent-runs/$runId/result").result
+    } catch (_: RepositoryException) {
+        null // no result yet / 404 → absent
+    }
+
+    override suspend fun events(runId: String, since: Long): List<AgentEvent> {
+        @Serializable
+        data class EventDto(val seq: Long, val kind: String, val payload: JsonObject) {
+            fun toDomain(): AgentEvent = AgentEvent(
+                seq = seq,
+                kind = kind,
+                text = listOf("text", "message", "summary")
+                    .firstNotNullOfOrNull { payload[it]?.jsonPrimitive?.contentOrNull }
+                    ?.takeIf { it.isNotBlank() },
+            )
+        }
+        @Serializable
+        data class EventsEnvelope(val events: List<EventDto>)
+        return api.decode<EventsEnvelope>("/v1/agent-runs/$runId/events", query = mapOf("since" to since.toString()))
+            .events.map { it.toDomain() }
+    }
+
+    override suspend fun commands(backend: String): List<AgentCommand> = try {
+        @Serializable
+        data class CommandsEnvelope(val commands: List<AgentCommand>)
+        api.decode<CommandsEnvelope>("/v1/agents/commands", query = mapOf("backend" to backend)).commands
+    } catch (_: RepositoryException) {
+        emptyList() // commandless backend → 400 → none
+    }
+
+    override suspend fun runCommand(runId: String, command: String, arguments: String, requestId: RequestId): AgentRun {
+        @Serializable
+        data class CommandBody(val command: String, val arguments: String)
+        val body = CommandBody(command, arguments)
+        return api.post("/v1/agent-runs/$runId/command", KompaktJson.encodeToString(body))
+            .let { KompaktJson.decodeFromString<RunEnvelope>(it).agentRun }
+    }
+
+    @Serializable
+    private data class RunEnvelope(@SerialName("agent_run") val agentRun: AgentRun)
 }
 
 // ─── Capture pipeline (Phase 6: interpret → confirm → commit) ──────────
