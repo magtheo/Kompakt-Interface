@@ -29,7 +29,9 @@ import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
+import dev.magnor.kompakt.ui.MarkdownText
 import dev.magnor.kompakt.ui.containerViewModel
+import dev.magnor.kompakt.ui.mdPreview
 import dev.magnor.kompakt.ui.relativeTo
 import dev.magnor.kompakt.ui.timeOfDay
 import dev.magnor.kompakt.ui.viewmodels.ChatComposerMode
@@ -137,7 +139,7 @@ fun ChatThreadScreen(
                         if (jumpOpen) {
                             messages.forEachIndexed { index, message ->
                                 ListRow(
-                                    title = "#${index + 1} · ${message.content.take(42)}",
+                                    title = "#${index + 1} · ${mdPreview(message.content, 42)}",
                                     subtitle = "${if (message.role == MessageRole.USER) "You" else "Assistant"} · ${message.createdAt.timeOfDay()}",
                                     onClick = {
                                         jumpOpen = false
@@ -207,7 +209,7 @@ fun ChatThreadScreen(
                     label = { TextMMD(if (editing != null) "Edited message" else "Message") },
                     enabled = !sending,
                     singleLine = false,
-                    maxLines = 4,
+                    maxLines = 6,
                 )
                 Row(
                     modifier = Modifier
@@ -263,16 +265,16 @@ private fun ChatMessageRow(
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                 CardMMD(onClick = onClick, modifier = Modifier.fillMaxWidth(0.85f)) {
                     Column(Modifier.padding(12.dp)) {
-                        TextMMD(text = message.content, fontWeight = FontWeight.SemiBold)
-                        TextMMD(text = meta, fontSize = 12.sp)
+                        MarkdownText(raw = message.content, baseFontWeight = FontWeight.SemiBold)
+                        TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
         } else {
             CardMMD(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    TextMMD(text = message.content)
-                    TextMMD(text = meta, fontSize = 12.sp)
+                    MarkdownText(raw = message.content)
+                    TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }
             }
         }
