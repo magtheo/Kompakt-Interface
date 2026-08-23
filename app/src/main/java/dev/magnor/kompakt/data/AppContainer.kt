@@ -71,6 +71,7 @@ import dev.magnor.kompakt.domain.UnauthorizedException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.datetime.Clock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -100,7 +101,9 @@ sealed interface ServerMode {
 
 class AppContainer(
     val mode: ServerMode = ServerMode.Fake,
-    val clock: () -> Instant = { FakeData.NOW },
+    // Real wall clock by default — a frozen FakeData.NOW here made every
+    // server timestamp read as "future" ("soon") in remote mode (T-013 fix).
+    val clock: () -> Instant = Clock.System::now,
     secretVault: SecretVault? = null,
     captureQueueDir: java.io.File? = null,
 ) {

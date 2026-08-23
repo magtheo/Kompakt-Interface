@@ -15,7 +15,7 @@ import kotlinx.datetime.toLocalDateTime
  */
 
 fun Instant.timeOfDay(): String {
-    val t = toLocalDateTime(TimeZone.UTC)
+    val t = toLocalDateTime(TimeZone.currentSystemDefault())
     return "%02d:%02d".format(t.hour, t.minute)
 }
 
