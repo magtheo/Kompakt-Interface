@@ -30,6 +30,7 @@ import dev.magnor.kompakt.domain.AgentRole
 import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.AgentRunKind
 import dev.magnor.kompakt.domain.AgentRunState
+import dev.magnor.kompakt.ui.MarkdownText
 import dev.magnor.kompakt.ui.containerViewModel
 import dev.magnor.kompakt.ui.timeOfDay
 import dev.magnor.kompakt.ui.viewmodels.AgentDetailViewModel
@@ -476,14 +477,17 @@ private fun ChatEventRow(event: AgentEvent) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
             CardMMD(modifier = Modifier.fillMaxWidth(0.85f)) {
                 Column(Modifier.padding(12.dp)) {
-                    TextMMD(text = event.text ?: "—", fontWeight = FontWeight.SemiBold)
+                    MarkdownText(
+                        raw = event.text ?: "—",
+                        baseFontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
     } else {
         CardMMD(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp)) {
-                TextMMD(text = event.text ?: "—")
+                MarkdownText(raw = event.text ?: "—")
             }
         }
     }
