@@ -293,6 +293,16 @@ class AppContainer(
 
     val remoteActive: Boolean get() = remoteStack != null
 
+    /**
+     * Connectivity-triggered flush entry point (Phase 9). No-op when the
+     * queue is empty or no remote stack is active; rate limiting lives in
+     * FlushPolicy at the call site.
+     */
+    fun tryFlushPendingCaptures() {
+        if (pendingCaptures.count.value == 0) return
+        scope.launch { flushPendingCaptures() }
+    }
+
     /** Last-known capabilities (demo set until a remote stack refreshes it). */
     val capabilities: CapabilitySet get() = capabilityStore.capabilities.value
 
