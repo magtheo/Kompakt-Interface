@@ -1,7 +1,10 @@
 package dev.magnor.kompakt.data.remote
 
+import dev.magnor.kompakt.domain.AgentDispatchDraft
+import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.ProtocolNegotiation
 import dev.magnor.kompakt.domain.ProtocolVerdict
+import dev.magnor.kompakt.domain.SteerOutcome
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -97,5 +100,73 @@ class LiveServerSmokeTest {
                 threw,
             )
         }
+    }
+
+    /**
+     * T-011 acceptance: the agents vertical (Phase 8, V-052 contract) works
+     * against the live coordinator — surface decode (both backends, honest
+     * capabilities), merged run list with readable titles, events + result
+     * on a terminal Warren run, honest `unsupported` steer for pi, and a
+     * real OpenCode dispatch round-trip through the app's own DTO stack.
+     */
+    @Test
+    fun `reads agents surface and dispatches a live run`() = runTest {
+        assumeTrue("live env not set — skipping", url != null && token != null)
+        val agents = RemoteAgentRepository(api())
+
+        // The flag and the wire must agree: agents is served.
+        val caps = RemoteSyncRepository(api()).capabilities()
+        assertTrue("capabilities must advertise agents", caps.supports("agents"))
+
+        val surface = agents.observeSurface().first()
+        assertTrue(
+            "expected both live backends, got ${surface.backends.keys}",
+            "warren" in surface.backends && "opencode" in surface.backends,
+        )
+        assertTrue(
+            "pi must advertise honest spawn-only steering",
+            surface.agents.any { it.name == "pi" && it.steering == "spawn_only" },
+        )
+
+        val runs = agents.observeRuns().first()
+        assertTrue("expected runs from both backends", runs.isNotEmpty())
+        assertTrue(
+            "expected a warren run with a readable title (prompt-derived)",
+            runs.any { it.backend == "warren" && !it.displayTitle.isNullOrBlank() },
+        )
+
+        // Terminal warren run: events decode + result interpretation (w-1
+        // lesson 3: finalize_failed + salvage evidence ⇒ SUCCEEDED).
+        val terminal = runs.first {
+            it.backend == "warren" &&
+                (it.state == AgentRunState.SUCCEEDED || it.state == AgentRunState.FAILED)
+        }
+        val events = agents.events(terminal.id, since = 0)
+        assertTrue("expected a non-empty durable event stream", events.isNotEmpty())
+        val result = agents.result(terminal.id)
+        assertTrue("terminal run must yield an interpreted result", result != null)
+        assertTrue("result must carry a summary", !result?.summary.isNullOrBlank())
+
+        // Warren steering is honestly unsupported — never silently pretend.
+        val steer = agents.steer(terminal.id, "focus on the readme", requestId = "live-smoke-agents")
+        assertEquals(
+            "pi is spawn-only; steer must report unsupported",
+            SteerOutcome.UNSUPPORTED,
+            steer,
+        )
+
+        // Real dispatch round-trip on the default (opencode) lane.
+        val dispatched = agents.dispatch(
+            AgentDispatchDraft(
+                prompt = "Reply with the single word OK. Do not use any tools.",
+                backend = "opencode",
+            ),
+            requestId = "live-smoke-agents",
+        )
+        assertEquals("dispatch backend", "opencode", dispatched.backend)
+        assertTrue(
+            "opencode executions are ses_… sessions, got ${dispatched.id}",
+            dispatched.id.startsWith("ses_"),
+        )
     }
 }
