@@ -10,16 +10,22 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.mudita.mmd.components.buttons.FloatingActionButtonMMD
 import com.mudita.mmd.components.nav_bar.NavigationBarMMD
 import com.mudita.mmd.components.nav_bar.NavigationBarItemMMD
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.data.AppContainer
+import dev.magnor.kompakt.domain.SurfaceGating
+import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.ui.navigation.Routes
 import dev.magnor.kompakt.ui.navigation.TopLevelDestination
 import dev.magnor.kompakt.ui.screens.AgentDetailScreen
@@ -39,10 +45,15 @@ import dev.magnor.kompakt.ui.screens.ProjectsScreen
 import dev.magnor.kompakt.ui.screens.SettingsScreen
 import dev.magnor.kompakt.ui.screens.TasksScreen
 import dev.magnor.kompakt.ui.screens.TodayScreen
+import dev.magnor.kompakt.ui.viewmodels.TasksViewModel
 
 /**
  * App shell: bottom navigation (Today | Chat | Agents | More) over a NavHost.
  * E-Ink rule: navigation transitions disabled (docs/development-plan.md Phase 1).
+ *
+ * T-006: the shell is the single capability-gating point (protocol §9) —
+ * it derives one [SurfaceGating.Surfaces] from the live capability cache
+ * and passes visibility down; screens never re-read capabilities.
  */
 @Composable
 fun KompaktApp(container: AppContainer) {
@@ -54,15 +65,27 @@ fun KompaktApp(container: AppContainer) {
 @Composable
 private fun KompaktNavHost() {
     val navController = rememberNavController()
+    val appContainer = LocalAppContainer.current
+    val caps by appContainer.capabilityStore.capabilities.collectAsState()
+    val surfaces = remember(caps) { SurfaceGating.evaluate(caps) }
+
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val isTopLevel = currentRoute in TopLevelDestination.routes
+
+    val visibleTabs = TopLevelDestination.entries.filter { dest ->
+        when (dest) {
+            TopLevelDestination.CHAT -> surfaces.chatTab
+            TopLevelDestination.AGENTS -> surfaces.agentsTab
+            else -> true
+        }
+    }
 
     Scaffold(
         bottomBar = {
             if (isTopLevel) {
                 NavigationBarMMD {
-                    TopLevelDestination.entries.forEach { dest ->
+                    visibleTabs.forEach { dest ->
                         NavigationBarItemMMD(
                             selected = currentRoute == dest.route,
                             onClick = {
@@ -85,8 +108,9 @@ private fun KompaktNavHost() {
             }
         },
         floatingActionButton = {
-            // Universal capture action — persistent on the main surfaces.
-            if (isTopLevel) {
+            // Universal capture action — persistent on the main surfaces,
+            // but only while the server supports capture (protocol §9).
+            if (isTopLevel && surfaces.captureFab) {
                 FloatingActionButtonMMD(
                     onClick = { navController.navigate(Routes.CAPTURE) },
                 ) {
@@ -105,7 +129,12 @@ private fun KompaktNavHost() {
             popExitTransition = { ExitTransition.None },
         ) {
             composable(Routes.TODAY) {
-                TodayScreen(onOpenInbox = { navController.navigate(Routes.INBOX) })
+                TodayScreen(
+                    onOpenInbox = { navController.navigate(Routes.INBOX) },
+                    showInboxAction = surfaces.inboxEntry,
+                    showAgentsSection = surfaces.agentsSectionOnToday,
+                    showRecentNote = surfaces.recentNoteOnToday,
+                )
             }
             composable(Routes.CHAT_LIST) {
                 ChatListScreen(
@@ -146,26 +175,66 @@ private fun KompaktNavHost() {
                     onOpenOrganize = { navController.navigate(Routes.ORGANIZE) },
                     onOpenInbox = { navController.navigate(Routes.INBOX) },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                    showInbox = surfaces.inboxEntry,
                 )
             }
             composable(Routes.ORGANIZE) {
                 OrganizeScreen(
                     onOpenProjects = { navController.navigate(Routes.PROJECTS) },
                     onOpenAreas = { navController.navigate(Routes.AREAS) },
-                    onOpenTasks = { navController.navigate(Routes.TASKS) },
+                    onOpenTasks = { navController.navigate(Routes.tasks()) },
                     onOpenNotes = { navController.navigate(Routes.NOTES) },
+                    showNotes = surfaces.notesEntry,
                 )
             }
             composable(Routes.PROJECTS) {
-                ProjectsScreen(onBack = { navController.popBackStack() })
+                ProjectsScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenProjectTasks = { projectId ->
+                        navController.navigate(Routes.tasks(projectId = projectId))
+                    },
+                )
             }
             composable(Routes.AREAS) {
-                AreasScreen(onBack = { navController.popBackStack() })
+                AreasScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenAreaTasks = { areaId ->
+                        navController.navigate(Routes.tasks(areaId = areaId))
+                    },
+                )
             }
-            composable(Routes.TASKS) {
+            composable(
+                route = Routes.TASKS_PATTERN,
+                arguments = listOf(
+                    navArgument("projectId") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                    navArgument("areaId") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+            ) { entry ->
+                val projectId = entry.arguments?.getString("projectId")
+                val areaId = entry.arguments?.getString("areaId")
                 TasksScreen(
                     onOpenItem = { navController.navigate(Routes.item(it)) },
                     onBack = { navController.popBackStack() },
+                    viewModel = containerViewModel(key = "tasks-$projectId-$areaId") {
+                        TasksViewModel(
+                            taskRepository = it.taskRepository,
+                            organizationRepository = it.organizationRepository,
+                            now = it.now(),
+                            filter = when {
+                                projectId != null -> TaskFilter.ByProject(projectId)
+                                areaId != null -> TaskFilter.ByArea(areaId)
+                                else -> TaskFilter.All
+                            },
+                        )
+                    },
                 )
             }
             composable(Routes.NOTES) {

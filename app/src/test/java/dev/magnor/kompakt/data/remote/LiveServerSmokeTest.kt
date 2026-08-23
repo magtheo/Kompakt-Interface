@@ -61,4 +61,41 @@ class LiveServerSmokeTest {
             )
         }
     }
+
+    /**
+     * T-006 acceptance: the Today + Organize vertical slice reads decode
+     * against the live coordinator — Today projection (events/tasks/
+     * attention/aggregates) and the Areas axis of the PARA projection.
+     */
+    @Test
+    fun `reads today projection and areas`() = runTest {
+        assumeTrue("live env not set — skipping", url != null && token != null)
+
+        val today = RemoteTodayRepository(api()).today()
+        assertTrue(
+            "today projection must decode with a real date",
+            today.date.toEpochDays() > 0,
+        )
+
+        val areas = RemoteOrganizationRepository(api()).observeAreas().first()
+        assertTrue("expected vault PARA areas", areas.isNotEmpty())
+
+        // Surface gating stays consistent with what the server actually serves:
+        // when capabilities say notes=false, a notes read must fail closed
+        // (the UI relies on the flag, not on the request, per protocol §9).
+        val caps = RemoteSyncRepository(api()).capabilities()
+        val notesServed = caps.supports("notes")
+        if (!notesServed) {
+            var threw = false
+            try {
+                RemoteNoteRepository(api()).observeNotes().first()
+            } catch (e: Exception) {
+                threw = true
+            }
+            assertTrue(
+                "notes flagged off but /v1/notes served data — flag and wire disagree",
+                threw,
+            )
+        }
+    }
 }
