@@ -199,6 +199,18 @@ class AppContainer(
     @Volatile
     private var remoteStack: RemoteStack? = null
 
+    /**
+     * Offline capture queue — commits parked while offline, re-sent with
+     * the same request id once a remote stack is active.
+     *
+     * MUST be declared before the init block below: init → activateRemote
+     * launches flushPendingCaptures on Dispatchers.Default, which reads
+     * this store — Kotlin initializes properties and init blocks in
+     * declaration order, so a later declaration is a null-deref race on
+     * every cold start with an active enrollment (crash loop).
+     */
+    val pendingCaptures = PendingCaptureStore(captureQueueDir)
+
     private fun activateRemote(api: HttpApi) {
         val stack = RemoteStack(api)
         remoteStack = stack
@@ -247,9 +259,6 @@ class AppContainer(
     val organizationRepository: OrganizationRepository = SwitchOrganization()
     val inboxRepository: InboxRepository = SwitchInbox()
     val todayRepository: TodayRepository = SwitchToday()
-    /** Offline capture queue — commits parked while offline, re-sent with
-     * the same request id once a remote stack is active. */
-    val pendingCaptures = PendingCaptureStore(captureQueueDir)
 
     val captureRepository: CaptureRepository =
         QueueingCaptureRepository(SwitchCapture(), pendingCaptures) { flushPendingCaptures() }
