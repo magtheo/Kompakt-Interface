@@ -1,23 +1,31 @@
 package dev.magnor.kompakt.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.buttons.OutlinedButtonMMD
 import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.domain.AgentBackendInfo
+import dev.magnor.kompakt.domain.AgentEvent
 import dev.magnor.kompakt.domain.AgentRole
 import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.AgentRunKind
@@ -236,7 +244,14 @@ fun AgentDetailScreen(
     }
 }
 
-/** Run detail — process-manager controls + evidence + explicit transitions. */
+/**
+ * Run detail (T-013): transcript-first on the shared ChatScaffold. The
+ * dialogue owns the screen — assistant/user events render as full
+ * conversation rows (monochrome sender coding like chat), process events
+ * stay as dim one-liners. Metadata collapses into one summary card with an
+ * expandable Details section; commands live behind a "Run command" menu
+ * section; transitions stay explicit (D003).
+ */
 @Composable
 fun AgentRunDetailScreen(
     runId: String,
@@ -260,115 +275,216 @@ fun AgentRunDetailScreen(
     val feedback by viewModel.feedback.collectAsState()
 
     var message by remember { mutableStateOf("") }
+    var detailsOpen by remember { mutableStateOf(false) }
+    var commandsOpen by remember { mutableStateOf(false) }
 
-    AppScreen(title = run?.displayTitle ?: "Run", onBack = onBack) {
-        run?.let { r: AgentRun ->
-            DetailRow(label = "Status", value = "${runGlyph(r.state)} ${r.state.wire}")
-            DetailRow(label = "Kind", value = r.kind.wire)
-            DetailRow(label = "Backend", value = "${r.backend}/${r.agent.ifBlank { "—" }}")
-            r.projectRef?.let { DetailRow(label = "Project", value = it) }
-            r.prompt?.let { DetailRow(label = "Objective", value = it) }
-            r.createdAt?.let { DetailRow(label = "Started", value = it.timeOfDay()) }
-            r.updatedAt?.let { DetailRow(label = "Updated", value = it.timeOfDay()) }
-            if (r.tokensIn != null || r.tokensOut != null) {
-                DetailRow(label = "Tokens", value = "↑${r.tokensIn ?: 0} ↓${r.tokensOut ?: 0}")
-            }
+    val listState = rememberLazyListState()
+    LaunchedEffect(events.size) {
+        if (events.isNotEmpty()) runCatching { listState.scrollToItem(events.size) }
+    }
 
-            if (!r.state.isTerminal) {
-                SectionLabel("Controls")
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (r.kind == AgentRunKind.SESSION && info?.resumable == true) {
-                        OutlinedTextField(
-                            value = message,
-                            onValueChange = { message = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { TextMMD("Message the session") },
-                            singleLine = false,
-                            maxLines = 3,
+    val resumable = run?.kind == AgentRunKind.SESSION && info?.resumable == true
+
+    ChatScaffold(
+        title = run?.displayTitle ?: "Run",
+        onBack = onBack,
+        listState = listState,
+        transcript = {
+            run?.let { r: AgentRun ->
+                // Status summary — one line instead of a metadata dashboard.
+                item(key = "status") {
+                    CardMMD(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            TextMMD(
+                                "${runGlyph(r.state)} ${r.state.wire} · ${r.backend}/${r.agent.ifBlank { "—" }}",
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            val parts = buildList {
+                                r.createdAt?.let { add("started ${it.timeOfDay()}") }
+                                if (r.tokensIn != null || r.tokensOut != null) {
+                                    add("↑${r.tokensIn ?: 0} ↓${r.tokensOut ?: 0}")
+                                }
+                                r.projectRef?.let { add("· $it") }
+                            }
+                            if (parts.isNotEmpty()) {
+                                TextMMD(parts.joinToString(" · "), fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+                if (detailsOpen) {
+                    item(key = "details") {
+                        CardMMD(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp)) {
+                                DetailRow(label = "Kind", value = r.kind.wire)
+                                r.prompt?.let { DetailRow(label = "Objective", value = it) }
+                                r.updatedAt?.let { DetailRow(label = "Updated", value = it.timeOfDay()) }
+                                if (r.tokensIn != null || r.tokensOut != null) {
+                                    DetailRow(label = "Tokens", value = "↑${r.tokensIn ?: 0} ↓${r.tokensOut ?: 0}")
+                                }
+                                info?.let { caps ->
+                                    DetailRow(label = "Capabilities", value = capSummary(caps))
+                                }
+                            }
+                        }
+                    }
+                }
+                // Details toggle is the card's own affordance — tap the card.
+                item(key = "status-tap") {
+                    ButtonMMD(
+                        onClick = { detailsOpen = !detailsOpen },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { TextMMD(if (detailsOpen) "Hide details" else "Show details") }
+                }
+
+                result?.let { res ->
+                    item(key = "result") {
+                        CardMMD(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp)) {
+                                TextMMD("Result", fontWeight = FontWeight.Bold)
+                                res.summary?.let { TextMMD(it, modifier = Modifier.padding(top = 4.dp)) }
+                                res.branch?.let { TextMMD("Branch: $it", fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
+                                if (res.commitRefs.isNotEmpty()) {
+                                    TextMMD("Commits: ${res.commitRefs.joinToString(", ")}", fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                                }
+                                res.salvageRef?.let { TextMMD("Salvage: $it", fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
+                            }
+                        }
+                    }
+                }
+
+                // Transcript: dialogue events in full, process events dim.
+                items(events.size) { index ->
+                    val event = events[index]
+                    val isDialogue = event.kind.contains("message")
+                    if (isDialogue) {
+                        ChatEventRow(event)
+                    } else {
+                        TextMMD(
+                            "#${event.seq} ${event.kind}${event.text?.let { " · ${it.take(60)}" } ?: ""}",
+                            fontSize = 12.sp,
                         )
+                    }
+                }
+
+                if (events.isEmpty()) {
+                    item(key = "no-events") {
+                        ListRow(title = "No events yet", subtitle = "Activity will appear here")
+                    }
+                }
+
+                // Command menu — collapsed by default, one tap to open.
+                if (commands.isNotEmpty() && resumable && r.state != AgentRunState.SUCCEEDED && r.state != AgentRunState.FAILED && r.state != AgentRunState.CANCELLED) {
+                    item(key = "commands") {
+                        Column {
+                            ButtonMMD(
+                                onClick = { commandsOpen = !commandsOpen },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { TextMMD(if (commandsOpen) "Close commands ▴" else "Run command ▾") }
+                            if (commandsOpen) {
+                                commands.forEach { command ->
+                                    ListRow(
+                                        title = "/${command.name}",
+                                        subtitle = command.description,
+                                        onClick = {
+                                            commandsOpen = false
+                                            viewModel.runCommand(command)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Explicit transitions — compact row (D003).
+                item(key = "transitions") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButtonMMD(
+                            onClick = viewModel::discussInChat,
+                            modifier = Modifier.weight(1f),
+                        ) { TextMMD("Discuss") }
+                        OutlinedButtonMMD(
+                            onClick = viewModel::createTask,
+                            modifier = Modifier.weight(1f),
+                        ) { TextMMD("Task") }
+                        OutlinedButtonMMD(
+                            onClick = viewModel::saveNote,
+                            modifier = Modifier.weight(1f),
+                        ) { TextMMD("Note") }
+                    }
+                }
+
+                if (!r.state.isTerminal) {
+                    item(key = "cancel") {
+                        OutlinedButtonMMD(
+                            onClick = viewModel::cancel,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { TextMMD("Cancel run") }
+                    }
+                }
+
+                feedback?.let {
+                    item(key = "feedback") { ListRow(title = it, trailing = "·") }
+                }
+            } ?: item(key = "missing") { ListRow(title = "Run not found") }
+        },
+        composer = {
+            if (run != null && resumable && run?.state?.isTerminal == false) {
+                Column {
+                    OutlinedTextField(
+                        value = message,
+                        onValueChange = { message = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { TextMMD("Message the session") },
+                        singleLine = false,
+                        maxLines = 3,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         ButtonMMD(
                             onClick = {
                                 viewModel.send(message)
                                 message = ""
                             },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.weight(1f),
                             enabled = message.isNotBlank(),
                         ) { TextMMD("Send") }
-                    }
-                    if (info?.liveSteering == true) {
-                        OutlinedButtonMMD(
-                            onClick = { viewModel.steer(message) },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = message.isNotBlank(),
-                        ) { TextMMD("Steer (mid-run)") }
-                    } else {
-                        ListRow(title = "Steering", subtitle = "not supported by this backend")
-                    }
-                    if (commands.isNotEmpty() && r.kind == AgentRunKind.SESSION) {
-                        commands.forEach { command ->
+                        if (info?.liveSteering == true) {
                             OutlinedButtonMMD(
-                                onClick = { viewModel.runCommand(command) },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { TextMMD("/${command.name} — ${command.description}") }
+                                onClick = { viewModel.steer(message) },
+                                modifier = Modifier.weight(1f),
+                                enabled = message.isNotBlank(),
+                            ) { TextMMD("Steer") }
                         }
                     }
-                    OutlinedButtonMMD(
-                        onClick = viewModel::cancel,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { TextMMD("Cancel run") }
                 }
             }
+        },
+    )
+}
 
-            result?.let { res ->
-                SectionLabel("Result")
-                CardMMD(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        res.summary?.let { TextMMD(it) }
-                        res.branch?.let { TextMMD("Branch: $it", modifier = Modifier.padding(top = 4.dp)) }
-                        if (res.commitRefs.isNotEmpty()) {
-                            TextMMD("Commits: ${res.commitRefs.joinToString(", ")}", modifier = Modifier.padding(top = 4.dp))
-                        }
-                        res.salvageRef?.let { TextMMD("Salvage: $it", modifier = Modifier.padding(top = 4.dp)) }
-                    }
+/** Dialogue-style event row — same monochrome sender coding as chat (T-013). */
+@Composable
+private fun ChatEventRow(event: AgentEvent) {
+    val fromUser = event.kind.startsWith("user")
+    if (fromUser) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+            CardMMD(modifier = Modifier.fillMaxWidth(0.85f)) {
+                Column(Modifier.padding(12.dp)) {
+                    TextMMD(text = event.text ?: "—", fontWeight = FontWeight.SemiBold)
                 }
             }
-
-            if (events.isNotEmpty()) {
-                SectionLabel("Events")
-                events.takeLast(8).forEach { event ->
-                    ListRow(
-                        title = "#${event.seq} ${event.kind}",
-                        subtitle = event.text?.take(80),
-                    )
-                }
+        }
+    } else {
+        CardMMD(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                TextMMD(text = event.text ?: "—")
             }
-
-            SectionLabel("Explicit transitions (D003)")
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButtonMMD(
-                    onClick = viewModel::discussInChat,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { TextMMD("Discuss in chat") }
-                OutlinedButtonMMD(
-                    onClick = viewModel::createTask,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { TextMMD("Create task") }
-                OutlinedButtonMMD(
-                    onClick = viewModel::saveNote,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { TextMMD("Save note") }
-            }
-            feedback?.let { TextMMD(it, modifier = Modifier.padding(top = 8.dp)) }
-        } ?: ListRow(title = "Run not found")
+        }
     }
 }

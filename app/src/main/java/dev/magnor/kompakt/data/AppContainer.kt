@@ -322,6 +322,8 @@ class AppContainer(
             cur().createThread(draft, requestId)
         override suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): ChatExchange =
             cur().sendMessage(chatId, text, requestId)
+        override suspend fun truncate(chatId: EntityId, keepThrough: EntityId?, requestId: RequestId) =
+            cur().truncate(chatId, keepThrough, requestId)
     }
 
     private inner class SwitchAgent : AgentRepository {

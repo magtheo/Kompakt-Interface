@@ -2,11 +2,16 @@ package dev.magnor.kompakt.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -114,5 +119,57 @@ fun DetailRow(label: String, value: String) {
     ) {
         TextMMD(text = label)
         TextMMD(text = value, fontWeight = FontWeight.Bold)
+    }
+}
+
+/**
+ * Conversation layout (T-013): top bar, scrolling transcript, fixed bottom
+ * composer. Replaces AppScreen's scroll-the-whole-page pattern for every
+ * message-style screen (chat threads, agent run detail) — the composer must
+ * never live below the fold, and the transcript must start at the latest
+ * message. No animation on scroll (e-ink: each frame is a full refresh).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatScaffold(
+    title: String,
+    onBack: (() -> Unit)? = null,
+    actions: @Composable RowScope.() -> Unit = {},
+    listState: LazyListState = rememberLazyListState(),
+    header: @Composable () -> Unit = {},
+    transcript: LazyListScope.() -> Unit,
+    composer: @Composable () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        TopAppBarMMD(
+            title = { TextMMD(title, fontWeight = FontWeight.Bold) },
+            navigationIcon = {
+                val back = onBack
+                if (back != null) {
+                    IconButton(onClick = back) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            },
+            actions = actions,
+        )
+        header()
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            transcript()
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            composer()
+        }
     }
 }

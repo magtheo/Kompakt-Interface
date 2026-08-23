@@ -143,6 +143,27 @@ class FakeChatRepository(
             }
             ChatExchange(user = sent, assistant = reply)
         }
+
+    override suspend fun truncate(chatId: EntityId, keepThrough: EntityId?, requestId: RequestId) =
+        idempotency.once(requestId) {
+            require(threads.get(chatId) != null) { "chat '$chatId' not found" }
+            val ordered = messages.observeAll(compareBy { it.createdAt })
+                .first()
+                .filter { it.chatId == chatId }
+            if (keepThrough == null) {
+                ordered.forEach { messages.delete(it.id) }
+            } else {
+                val anchorIndex = ordered.indexOfFirst { it.id == keepThrough }
+                require(anchorIndex >= 0) { "keep_through message not found" }
+                ordered.drop(anchorIndex + 1).forEach { messages.delete(it.id) }
+            }
+            threads.get(chatId)?.let { thread ->
+                threads.mutate(thread.id, thread.revision) {
+                    it.copy(revision = it.revision + 1, updatedAt = now())
+                }
+            }
+            Unit
+        }
 }
 
 class FakeAgentRepository(

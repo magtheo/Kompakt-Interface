@@ -23,4 +23,12 @@ interface ChatRepository {
      * take tens of seconds — callers must tolerate the latency.
      */
     suspend fun sendMessage(chatId: EntityId, text: String, requestId: RequestId): ChatExchange
+
+    /**
+     * Destructive history cut (V-054): delete every message strictly after
+     * [keepThrough]; null empties the thread. No branch is kept. The single
+     * primitive behind revert / edit / regenerate — the client composes
+     * truncate + send.
+     */
+    suspend fun truncate(chatId: EntityId, keepThrough: EntityId?, requestId: RequestId)
 }

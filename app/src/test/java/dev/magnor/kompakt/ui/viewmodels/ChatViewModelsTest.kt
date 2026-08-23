@@ -52,6 +52,22 @@ private class ColdChatRepository(
         sentRequestIds.add(requestId)
         return sendOutcome(chatId, text)
     }
+
+    /** Recorded (keepThrough, requestId) pairs. */
+    val truncations = mutableListOf<Pair<EntityId?, RequestId>>()
+    var truncateOutcome: (EntityId?) -> Unit = { keepThrough ->
+        snapshot = if (keepThrough == null) {
+            emptyList()
+        } else {
+            val idx = snapshot.indexOfFirst { it.id == keepThrough }
+            if (idx >= 0) snapshot.take(idx + 1) else snapshot
+        }
+    }
+
+    override suspend fun truncate(chatId: EntityId, keepThrough: EntityId?, requestId: RequestId) {
+        truncations.add(keepThrough to requestId)
+        truncateOutcome(keepThrough)
+    }
 }
 
 /**
@@ -166,6 +182,120 @@ class ChatThreadViewModelTest {
         vm.send()
         assertTrue(repo.sentRequestIds.isEmpty())
         assertTrue(vm.messages.value.isEmpty())
+    }
+
+    // ── T-013 history operations (truncate composition) ────────────────
+
+    private fun seededConversation() = listOf(
+        msg("u1", MessageRole.USER, "first question"),
+        msg("a1", MessageRole.ASSISTANT, "first answer"),
+        msg("u2", MessageRole.USER, "second question"),
+        msg("a2", MessageRole.ASSISTANT, "second answer"),
+    )
+
+    @Test
+    fun `revert keeps the prefix through the anchor and drops the rest`() = runTest {
+        repo = ColdChatRepository(snapshot = seededConversation())
+        val vm = ChatThreadViewModel(repo, "chat_1", { "req-t" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
+
+        vm.revertTo(msg("u2", MessageRole.USER, "second question"))
+
+        assertEquals(listOf("u2" to "req-t"), repo.truncations.map { it.first to it.second })
+        assertEquals(listOf("u1", "a1", "u2"), vm.messages.value.map { it.id })
+        assertTrue(ChatSendState.Idle == vm.sendState.value)
+        collector.cancel()
+    }
+
+    @Test
+    fun `revert failure surfaces a notice and leaves history intact`() = runTest {
+        repo = ColdChatRepository(snapshot = seededConversation())
+        repo.truncateOutcome = { throw RuntimeException("server said no") }
+        val vm = ChatThreadViewModel(repo, "chat_1", { "req-t" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
+
+        vm.revertTo(msg("u1", MessageRole.USER, "first question"))
+
+        assertTrue(vm.notice.value?.contains("Revert failed") == true)
+        assertEquals(4, vm.messages.value.size)
+        collector.cancel()
+    }
+
+    @Test
+    fun `edit truncates before the target and sends the rewritten text`() = runTest {
+        repo = ColdChatRepository(snapshot = seededConversation())
+        repo.sendOutcome = { _, text ->
+            val user = msg("u3", MessageRole.USER, text)
+            val assistant = msg("a3", MessageRole.ASSISTANT, "reply to $text")
+            repo.snapshot = repo.snapshot + listOf(user, assistant)
+            ChatExchange(user, assistant)
+        }
+        val vm = ChatThreadViewModel(repo, "chat_1", { "req-e" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
+
+        vm.beginEdit(msg("u2", MessageRole.USER, "second question"))
+        assertTrue(vm.composerMode.value is ChatComposerMode.EditFrom)
+        assertEquals("second question", vm.draft.value)
+
+        vm.onDraftChange("rephrased question")
+        vm.send()
+
+        // Truncated everything after a1, then sent the rewrite.
+        assertEquals(listOf("a1"), repo.truncations.map { it.first })
+        assertEquals(1, repo.sentRequestIds.size)
+        val rendered = vm.messages.value
+        assertEquals(listOf("u1", "a1", "u3", "a3"), rendered.map { it.id })
+        assertEquals("rephrased question", rendered[2].content)
+        assertTrue(vm.composerMode.value is ChatComposerMode.Plain)
+        assertTrue(ChatSendState.Idle == vm.sendState.value)
+        collector.cancel()
+    }
+
+    @Test
+    fun `edit failure restores the draft and does not send`() = runTest {
+        repo = ColdChatRepository(snapshot = seededConversation())
+        repo.truncateOutcome = { throw RuntimeException("offline") }
+        val vm = ChatThreadViewModel(repo, "chat_1", { "req-e" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
+
+        vm.beginEdit(msg("u2", MessageRole.USER, "second question"))
+        vm.onDraftChange("never lands")
+        vm.send()
+
+        assertTrue(repo.sentRequestIds.isEmpty())
+        assertEquals("never lands", vm.draft.value)
+        assertTrue(vm.notice.value?.contains("Edit failed") == true)
+        assertTrue(ChatSendState.Idle == vm.sendState.value)
+        collector.cancel()
+    }
+
+    @Test
+    fun `regenerate drops the trailing pair and resends the same user text`() = runTest {
+        repo = ColdChatRepository(snapshot = seededConversation())
+        val sent = mutableListOf<String>()
+        repo.sendOutcome = { _, text ->
+            sent.add(text)
+            val user = msg("u4", MessageRole.USER, text)
+            val assistant = msg("a4", MessageRole.ASSISTANT, "better answer")
+            repo.snapshot = listOf(
+                msg("u1", MessageRole.USER, "first question"),
+                msg("a1", MessageRole.ASSISTANT, "first answer"),
+                user,
+                assistant,
+            )
+            ChatExchange(user, assistant)
+        }
+        val vm = ChatThreadViewModel(repo, "chat_1", { "req-r" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
+
+        vm.regenerate()
+
+        // Kept through a1 (message before the trailing pair), resent u2's text.
+        assertEquals(listOf("a1"), repo.truncations.map { it.first })
+        assertEquals(listOf("second question"), sent)
+        assertEquals(listOf("u1", "a1", "u4", "a4"), vm.messages.value.map { it.id })
+        assertTrue(ChatSendState.Idle == vm.sendState.value)
+        collector.cancel()
     }
 }
 
