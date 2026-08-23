@@ -99,7 +99,15 @@ class HttpApi(
     private suspend fun execute(request: Request, timeoutSeconds: Long? = null): String =
         withContext(Dispatchers.IO) {
             val callClient = if (timeoutSeconds != null) {
-                client.newBuilder().callTimeout(timeoutSeconds, TimeUnit.SECONDS).build()
+                // OkHttp's default readTimeout (10s) fires during silent
+                // long-latency server work (chat LLM generates before any
+                // bytes flow) even when callTimeout is raised — extend the
+                // per-IO timeouts as well, not just the whole-call budget.
+                client.newBuilder()
+                    .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                    .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                    .writeTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                    .build()
             } else client
             val builder = request.newBuilder()
                 .header("Accept", "application/json")
