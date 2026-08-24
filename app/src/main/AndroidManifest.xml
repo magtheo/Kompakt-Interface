@@ -11,6 +11,9 @@
     <!-- T-020: local calendar reminders; exact only when OS-granted,
          inexact fallback otherwise (see ReminderScheduler). -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- T-021: Phase 11 voice input — runtime permission, prompted on
+         first mic tap (see MicButton). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".KompaktApplication"
