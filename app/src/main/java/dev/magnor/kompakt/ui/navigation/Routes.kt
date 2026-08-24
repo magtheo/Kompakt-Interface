@@ -1,5 +1,8 @@
 package dev.magnor.kompakt.ui.navigation
 
+import dev.magnor.kompakt.domain.EntityKind
+import dev.magnor.kompakt.domain.InboxItem
+
 /**
  * Route table (Phase 1 — static placeholders; T-006 adds task filters).
  *
@@ -40,6 +43,18 @@ object Routes {
     fun agent(backend: String, name: String) = "agents/$backend/$name"
     fun run(id: String) = "runs/$id"
     fun item(id: String) = "item/$id"
+
+    /**
+     * Deep-link route for an inbox / Today attention item (T-018).
+     * Agent-run alerts jump straight to the run screen; everything else
+     * falls back to the generic resolver.
+     */
+    fun fromInboxItem(item: InboxItem): String =
+        if (item.sourceType == EntityKind.AGENT_RUN && !item.sourceId.isNullOrBlank()) {
+            run(item.sourceId)
+        } else {
+            item(item.id)
+        }
 
     /** Build a tasks route with at most one filter (project wins if both given). */
     fun tasks(projectId: String? = null, areaId: String? = null): String = when {

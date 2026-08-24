@@ -140,8 +140,10 @@ class RemoteInboxRepository(private val api: HttpApi) : InboxRepository {
     override fun observeInbox(): Flow<List<InboxItem>> = flow {
         emit(api.decodeList("/v1/inbox", "inbox_items"))
     }
-    override suspend fun dismiss(id: EntityId, expectedRevision: Long, requestId: RequestId) =
-        writesLandInPhase6("dismissing inbox items")
+    override suspend fun dismiss(id: EntityId, expectedRevision: Long, requestId: RequestId) {
+        // V-057 read endpoint; derived alerts 404 → caller treats as no-op.
+        api.post("/v1/inbox/$id/read", "{}", requestId)
+    }
 }
 
 class RemoteChatRepository(private val api: HttpApi) : ChatRepository {

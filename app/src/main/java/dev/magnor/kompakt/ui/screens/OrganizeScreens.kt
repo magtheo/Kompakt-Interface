@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import dev.magnor.kompakt.domain.EntityId
+import dev.magnor.kompakt.domain.InboxItem
 import dev.magnor.kompakt.domain.ProjectStatus
 import dev.magnor.kompakt.domain.TaskStatus
 import dev.magnor.kompakt.ui.containerViewModel
@@ -224,7 +225,7 @@ fun NotesScreen(
 /** Inbox — aggregated attention; opening an item opens its source object. */
 @Composable
 fun InboxScreen(
-    onOpenItem: (EntityId) -> Unit,
+    onOpenItem: (InboxItem) -> Unit,
     onBack: () -> Unit,
     viewModel: InboxViewModel = containerViewModel { InboxViewModel(it.inboxRepository, it.now()) },
 ) {
@@ -240,7 +241,10 @@ fun InboxScreen(
                     title = item.title,
                     subtitle = item.timestamp.relativeTo(viewModel.now),
                     trailing = "●",
-                    onClick = { onOpenItem(item.sourceId ?: item.id) },
+                    onClick = {
+                        viewModel.markOpened(item)
+                        onOpenItem(item)
+                    },
                 )
             }
         }
