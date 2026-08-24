@@ -410,6 +410,8 @@ class AppContainer(
         override suspend fun getNote(id: EntityId): Note? = cur().getNote(id)
         override suspend fun createNote(draft: NoteDraft, requestId: RequestId): Note =
             cur().createNote(draft, requestId)
+        override suspend fun updateNote(id: EntityId, text: String, expectedChecksum: String): Note =
+            cur().updateNote(id, text, expectedChecksum)
     }
 
     private inner class SwitchOrganization : OrganizationRepository {

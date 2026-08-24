@@ -114,13 +114,68 @@ class RemoteTaskRepository(private val api: HttpApi) : TaskRepository {
 }
 
 class RemoteNoteRepository(private val api: HttpApi) : NoteRepository {
+
+    @Serializable
+    private data class NoteEnvelope(val note: Note? = null)
+
+    @Serializable
+    private data class CreateBody(
+        @SerialName("request_id") val requestId: RequestId,
+        val title: String? = null,
+        val text: String,
+        @SerialName("source_type") val sourceType: String? = null,
+        @SerialName("source_id") val sourceId: String? = null,
+    )
+
+    @Serializable
+    private data class UpdateBody(
+        val text: String,
+        @SerialName("expected_checksum") val expectedChecksum: String,
+    )
+
     override fun observeNotes(projectId: EntityId?, areaId: EntityId?): Flow<List<Note>> = flow {
-        emit(api.decodeList("/v1/notes", "notes"))
+        val query = buildMap {
+            if (projectId != null) put("project_id", projectId)
+            if (areaId != null) put("area_id", areaId)
+        }
+        emit(api.decodeList<Note>("/v1/notes", "notes", query))
     }
+
     override fun observeNote(id: EntityId): Flow<Note?> = flow { emit(getNote(id)) }
-    override suspend fun getNote(id: EntityId): Note? = null // empty feed in v0.1
-    override suspend fun createNote(draft: NoteDraft, requestId: RequestId): Note =
-        writesLandInPhase6("creating notes")
+
+    override suspend fun getNote(id: EntityId): Note? = try {
+        api.decode<NoteEnvelope>("/v1/notes/$id").note
+    } catch (_: RepositoryException) {
+        null // 404 and other rejects → absent (contract: repository returns null)
+    }
+
+    override suspend fun createNote(draft: NoteDraft, requestId: RequestId): Note {
+        // Title: first line of the text (server derives when blank/omitted).
+        val firstLine = draft.text.lineSequence().firstOrNull { it.isNotBlank() }
+        val body = CreateBody(
+            requestId = requestId,
+            title = firstLine,
+            text = draft.text,
+            sourceType = draft.sourceType?.wire,
+            sourceId = draft.sourceId,
+        )
+        val envelope = KompaktJson.decodeFromString<NoteEnvelope>(
+            api.post(
+                "/v1/notes",
+                KompaktJson.encodeToString(body),
+                requestId,
+            ),
+        )
+        return envelope.note ?: throw RepositoryException("server created note without body")
+    }
+
+    override suspend fun updateNote(id: EntityId, text: String, expectedChecksum: String): Note {
+        val body = UpdateBody(text = text, expectedChecksum = expectedChecksum)
+        val envelope = KompaktJson.decodeFromString<NoteEnvelope>(
+            api.put("/v1/notes/$id", KompaktJson.encodeToString(body)),
+        )
+        return envelope.note ?: throw RepositoryException("server updated note without body")
+    }
 }
 
 class RemoteOrganizationRepository(private val api: HttpApi) : OrganizationRepository {

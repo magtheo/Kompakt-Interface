@@ -14,15 +14,20 @@ import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.InboxItem
 import dev.magnor.kompakt.domain.Note
+import dev.magnor.kompakt.domain.NoteConflictException
 import dev.magnor.kompakt.domain.Project
+import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.Task
 import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.domain.TaskStatus
 import dev.magnor.kompakt.ui.dayLabel
+import dev.magnor.kompakt.ui.relativeTo
 import dev.magnor.kompakt.ui.timeOfDay
 import dev.magnor.kompakt.ui.userMessage
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flowOf
@@ -151,20 +156,170 @@ class TasksViewModel(
 }
 
 class NotesViewModel(
-    noteRepository: NoteRepository,
+    private val noteRepository: NoteRepository,
     val now: Instant,
 ) : ViewModel() {
+
+    /** Category bucket in the list below the pinned scratchpad. */
+    data class NotesSection(
+        val label: String,
+        val notes: List<Note>,
+    )
 
     data class NotesUiState(
         val loaded: Boolean = false,
         val error: String? = null,
         val notes: List<Note> = emptyList(),
+        /** Pinned scratchpad row — the unprocessed queue (stage 1). */
+        val scratchpad: Note? = null,
+        /** Sections after the scratchpad, grouped by category. */
+        val sections: List<NotesSection> = emptyList(),
+        /** Capture sections currently sitting in the scratchpad. */
+        val unprocessedCount: Int = 0,
     )
 
     val state: StateFlow<NotesUiState> = noteRepository.observeNotes()
-        .map { NotesUiState(loaded = true, notes = it) }
+        .map { raw -> derive(raw) }
         .catch { e -> emit(NotesUiState(loaded = true, error = e.userMessage())) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NotesUiState())
+
+    /**
+     * Scratchpad pinned (as its Unprocessed header), everything else
+     * grouped by category with Inbox first. The unprocessed count needs
+     * the scratchpad detail (section headings) — one extra request per
+     * list load; a failure just yields 0, never blocks the list.
+     */
+    private suspend fun derive(raw: List<Note>): NotesUiState {
+        val scratchpad = raw.firstOrNull { it.isScratchpad }
+        val rest = raw.filterNot { it.isScratchpad }
+        val unprocessed = scratchpad
+            ?.let { runCatching { noteRepository.getNote(it.id) }.getOrNull() }
+            ?.text.orEmpty()
+            .lineSequence()
+            .count { it.startsWith("## ") }
+        val sections = rest
+            .groupBy { it.category?.takeIf { c -> c.isNotBlank() } ?: "Notes" }
+            .map { (label, notes) ->
+                NotesSection(label, notes.sortedByDescending { it.updatedAt })
+            }
+            .sortedWith(
+                compareBy({ if (it.label.equals("Inbox", ignoreCase = true)) 0 else 1 }, { it.label }),
+            )
+        return NotesUiState(
+            loaded = true,
+            notes = raw,
+            scratchpad = scratchpad,
+            sections = sections,
+            unprocessedCount = unprocessed,
+        )
+    }
+}
+
+/**
+ * T-022a: full-text note editor with the checksum optimistic lock (D028 v2).
+ * On 409 the user's text is NEVER replaced — the fresh checksum is adopted
+ * so a second Save overwrites, and Reload is the only path that pulls the
+ * server version into the editor (wording contract: explicit user action).
+ */
+class NoteEditorViewModel(
+    private val noteRepository: NoteRepository,
+    private val noteId: EntityId,
+    private val newRequestId: () -> RequestId,
+    private val now: () -> Instant,
+) : ViewModel() {
+
+    data class EditorUiState(
+        val loading: Boolean = true,
+        val notFound: Boolean = false,
+        val title: String = "Note",
+        val text: String = "",
+        /** sha256 the text was loaded under — the save lock. */
+        val checksum: String? = null,
+        /** Read-view meta: category bucket + origin line (12sp dim idiom). */
+        val category: String? = null,
+        val source: String? = null,
+        val relativeUpdated: String = "",
+        val dirty: Boolean = false,
+        val saving: Boolean = false,
+        /** 409 seen — banner stays until Reload or a successful save. */
+        val conflict: Boolean = false,
+        val savedAt: Instant? = null,
+        val error: String? = null,
+    ) {
+        val canSave: Boolean get() = !loading && !notFound && dirty && !saving
+    }
+
+    private var loadedText: String = ""
+
+    private val _state = MutableStateFlow(EditorUiState())
+    val state: StateFlow<EditorUiState> = _state.asStateFlow()
+
+    init {
+        reload()
+    }
+
+    /** Fetch server text + checksum; also the conflict-banner Reload action. */
+    fun reload() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(loading = true, error = null)
+            try {
+                val note = noteRepository.getNote(noteId)
+                loadedText = note?.text.orEmpty()
+                _state.value = if (note == null) {
+                    EditorUiState(loading = false, notFound = true)
+                } else {
+                    EditorUiState(
+                        loading = false,
+                        title = note.displayTitle,
+                        text = loadedText,
+                        checksum = note.checksum,
+                        category = note.category,
+                        source = note.sourceType?.let { "from ${it.wire} ${note.sourceId ?: ""}".trim() },
+                        relativeUpdated = note.updatedAt.relativeTo(now()),
+                    )
+                }
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(loading = false, error = e.userMessage())
+            }
+        }
+    }
+
+    fun onTextChange(text: String) {
+        _state.value = _state.value.copy(text = text, dirty = text != loadedText)
+    }
+
+    fun save() {
+        val lock = _state.value.checksum
+        if (lock == null) {
+            _state.value = _state.value.copy(error = "This note cannot be saved from here")
+            return
+        }
+        if (!_state.value.canSave) return
+        _state.value = _state.value.copy(saving = true, error = null)
+        viewModelScope.launch {
+            try {
+                val updated = noteRepository.updateNote(noteId, _state.value.text, lock)
+                loadedText = _state.value.text
+                _state.value = _state.value.copy(
+                    saving = false,
+                    savedAt = now(),
+                    dirty = false,
+                    conflict = false,
+                    checksum = updated.checksum,
+                )
+            } catch (e: NoteConflictException) {
+                // Server moved on (e.g. sorter sweep). Keep the user's text,
+                // adopt the fresh checksum so a second Save overwrites.
+                _state.value = _state.value.copy(
+                    saving = false,
+                    conflict = true,
+                    checksum = e.fresh.checksum,
+                )
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(saving = false, error = e.userMessage())
+            }
+        }
+    }
 }
 
 /** Inbox — aggregated attention items; a view, not a source of truth. */
@@ -245,7 +400,7 @@ class ItemDetailViewModel(
                 source = task.sourceType?.let { "from ${it.wire} ${task.sourceId ?: ""}".trim() },
             )
             note != null -> ItemUiState(
-                found = true, kind = "Note", title = note.preview,
+                found = true, kind = "Note", title = note.displayTitle,
                 subtitle = note.text, revision = note.revision,
                 project = note.projectId?.let { pid -> projects.firstOrNull { it.id == pid }?.name },
                 source = note.sourceType?.let { "from ${it.wire} ${note.sourceId ?: ""}".trim() },

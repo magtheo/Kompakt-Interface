@@ -1,6 +1,8 @@
 package dev.magnor.kompakt.data.remote
 
 import dev.magnor.kompakt.domain.KompaktJson
+import dev.magnor.kompakt.domain.Note
+import dev.magnor.kompakt.domain.NoteConflictException
 import dev.magnor.kompakt.domain.OfflineException
 import dev.magnor.kompakt.domain.RepositoryException
 import dev.magnor.kompakt.domain.RevisionConflictException
@@ -14,8 +16,10 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -70,6 +74,19 @@ class HttpApi(
             .url(url(path))
         requestId?.let { builder.header("X-Request-Id", it) }
         return execute(builder.build(), timeoutSeconds)
+    }
+
+    /** Raw PUT with a JSON body (notes text edit, D028 v2). Same failure
+     *  taxonomy as [post]; whole-body upfront so default timeouts apply. */
+    suspend fun put(
+        path: String,
+        bodyJson: String,
+    ): String {
+        val request = Request.Builder()
+            .put(bodyJson.toRequestBody("application/json".toMediaType()))
+            .url(url(path))
+            .build()
+        return execute(request)
     }
 
     /** Raw POST with a multipart body (T-021 voice upload). Same failure
@@ -163,6 +180,8 @@ class HttpApi(
      * (`current_revision` present — sync endpoints). Agents busy-409s
      * (SessionBusyError while a turn runs) carry a plain `detail`;
      * surface that honestly instead of masquerading as a sync conflict.
+     * Notes edits (D028 v2) carry `detail.reason = "checksum_mismatch"`
+     * with the fresh note attached — decode into NoteConflictException.
      */
     private fun conflict(body: String): Exception {
         val parsed = try {
@@ -172,6 +191,19 @@ class HttpApi(
         }
         if (parsed?.currentRevision != null) {
             return RevisionConflictException(currentRevision = parsed.currentRevision)
+        }
+        // Notes checksum 409: detail is an OBJECT (reason + fresh note row).
+        val detailElement = (KompaktJson.parseToJsonElement(body) as? JsonObject)
+            ?.get("detail") as? JsonObject
+        if (detailElement?.get("reason")?.jsonPrimitive?.contentOrNull == "checksum_mismatch") {
+            val freshNote = detailElement.get("note")?.let {
+                try {
+                    KompaktJson.decodeFromJsonElement<Note>(it)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (freshNote != null) return NoteConflictException(fresh = freshNote)
         }
         val detail = try {
             KompaktJson.decodeFromString<ErrorBody>(body).detail

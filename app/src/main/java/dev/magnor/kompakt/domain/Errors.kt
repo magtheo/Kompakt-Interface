@@ -11,6 +11,15 @@ class RevisionConflictException(
     val currentRevision: Long,
 ) : RepositoryException("object changed on server (current revision $currentRevision)")
 
+/**
+ * 409 analog for notes (D028 v2): the file's checksum moved on from
+ * `expected_checksum`. Carries the FRESH note (text + checksum) so the
+ * editor can reload without a second round-trip — the user's edit is
+ * never silently merged (wording contract: explicit re-apply only).
+ */
+class NoteConflictException(val fresh: Note) :
+    RepositoryException("note changed on server (checksum mismatch)")
+
 /** Server permanently refused the mutation (4xx). Visible to the user with a reason. */
 class CaptureRejectedException(val reason: String) :
     RepositoryException("capture rejected: $reason")

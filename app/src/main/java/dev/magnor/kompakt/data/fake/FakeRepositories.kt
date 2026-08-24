@@ -19,6 +19,7 @@ import dev.magnor.kompakt.domain.AgentRunResult
 import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.AgentsSurface
 import dev.magnor.kompakt.domain.RepositoryException
+import dev.magnor.kompakt.domain.NoteConflictException
 import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.CaptureProposal
@@ -419,6 +420,9 @@ class FakeNoteRepository(
                 Note(
                     id = nextId(),
                     text = draft.text,
+                    title = draft.text.lineSequence().firstOrNull { it.isNotBlank() },
+                    role = Note.ROLE_INBOX,
+                    checksum = "fake-ck-${nextId()}",
                     createdAt = now(),
                     updatedAt = now(),
                     projectId = draft.projectId,
@@ -428,6 +432,23 @@ class FakeNoteRepository(
                 ),
             )
         }
+
+    override suspend fun updateNote(id: EntityId, text: String, expectedChecksum: String): Note {
+        val current = notes.get(id)
+            ?: throw RepositoryException("note not found: $id")
+        val currentChecksum = current.checksum
+        if (currentChecksum != null && currentChecksum != expectedChecksum) {
+            throw NoteConflictException(fresh = current)
+        }
+        return notes.mutate(id, current.revision) {
+            it.copy(
+                text = text,
+                checksum = "fake-ck-${nextId()}",
+                updatedAt = now(),
+                revision = it.revision + 1,
+            )
+        }
+    }
 }
 
 class FakeOrganizationRepository(
