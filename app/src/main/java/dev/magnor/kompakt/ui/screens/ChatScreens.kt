@@ -34,6 +34,10 @@ import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
 import dev.magnor.kompakt.ui.MarkdownText
+import dev.magnor.kompakt.voice.MicButton
+import dev.magnor.kompakt.voice.VoiceStatusText
+import dev.magnor.kompakt.voice.appendTranscript
+import dev.magnor.kompakt.voice.rememberVoiceInput
 import dev.magnor.kompakt.ui.containerViewModel
 import dev.magnor.kompakt.ui.mdPreview
 import dev.magnor.kompakt.ui.relativeTo
@@ -197,6 +201,11 @@ fun ChatThreadScreen(
         },
         composer = {
             val editing = composerMode as? ChatComposerMode.EditFrom
+            // T-021: mic lives in the composer slot — leaving the thread
+            // disposes it, cancelling any live recording.
+            val voice = rememberVoiceInput { transcript ->
+                viewModel.onDraftChange(appendTranscript(draft, transcript))
+            }
             Column {
                 if (editing != null) {
                     ListRow(
@@ -217,6 +226,7 @@ fun ChatThreadScreen(
                         enabled = !sending,
                         singleLine = false,
                         maxLines = 6,
+                        trailingIcon = { MicButton(voice) },
                     )
                     IconButton(
                         onClick = viewModel::send,
@@ -229,6 +239,7 @@ fun ChatThreadScreen(
                         )
                     }
                 }
+                VoiceStatusText(voice)
             }
         },
     )

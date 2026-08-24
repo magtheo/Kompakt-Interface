@@ -35,6 +35,10 @@ import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.AgentRunKind
 import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.ui.MarkdownText
+import dev.magnor.kompakt.voice.MicButton
+import dev.magnor.kompakt.voice.VoiceStatusText
+import dev.magnor.kompakt.voice.appendTranscript
+import dev.magnor.kompakt.voice.rememberVoiceInput
 import dev.magnor.kompakt.ui.containerViewModel
 import dev.magnor.kompakt.ui.timeOfDay
 import dev.magnor.kompakt.ui.viewmodels.AgentDetailViewModel
@@ -190,6 +194,10 @@ fun AgentDetailScreen(
         }
 
         SectionLabel("New run")
+        // T-021: dictate the objective instead of typing it.
+        val voice = rememberVoiceInput { transcript ->
+            prompt = appendTranscript(prompt, transcript)
+        }
         OutlinedTextField(
             value = prompt,
             onValueChange = { prompt = it },
@@ -197,7 +205,9 @@ fun AgentDetailScreen(
             label = { TextMMD("Objective") },
             singleLine = false,
             maxLines = 4,
+            trailingIcon = { MicButton(voice) },
         )
+        VoiceStatusText(voice)
         if (needsProject) {
             OutlinedTextField(
                 value = projectRef,
@@ -438,6 +448,10 @@ fun AgentRunDetailScreen(
         composer = {
             if (run != null && resumable && run?.state?.isTerminal == false) {
                 Column {
+                    // T-021: dictate steering messages; disposed with the composer.
+                    val voice = rememberVoiceInput { transcript ->
+                        message = appendTranscript(message, transcript)
+                    }
                     // T-015: single-row composer — field + compact send beside it.
                     Row(verticalAlignment = Alignment.Bottom) {
                         OutlinedTextField(
@@ -450,6 +464,7 @@ fun AgentRunDetailScreen(
                             },
                             singleLine = false,
                             maxLines = 4,
+                            trailingIcon = { MicButton(voice) },
                         )
                         IconButton(
                             onClick = {
@@ -469,6 +484,7 @@ fun AgentRunDetailScreen(
                             enabled = message.isNotBlank(),
                         ) { TextMMD("Steer instead (mid-run)") }
                     }
+                    VoiceStatusText(voice)
                 }
             }
         },

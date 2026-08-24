@@ -24,6 +24,10 @@ import dev.magnor.kompakt.ui.viewmodels.CaptureViewModel
 import dev.magnor.kompakt.ui.viewmodels.DiagnosticsViewModel
 import dev.magnor.kompakt.ui.viewmodels.EnrollmentViewModel
 import dev.magnor.kompakt.ui.viewmodels.ThemeViewModel
+import dev.magnor.kompakt.voice.MicButton
+import dev.magnor.kompakt.voice.VoiceStatusText
+import dev.magnor.kompakt.voice.appendTranscript
+import dev.magnor.kompakt.voice.rememberVoiceInput
 
 /**
  * Universal capture — propose → user confirms type → commit.
@@ -39,6 +43,11 @@ fun CaptureScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
+    // T-021: tap mic → dictate → transcript lands here as editable text.
+    val voice = rememberVoiceInput { transcript ->
+        viewModel.onTextChange(appendTranscript(state.text, transcript))
+    }
+
     AppScreen(title = "Capture", onBack = onBack) {
         OutlinedTextField(
             value = state.text,
@@ -48,7 +57,9 @@ fun CaptureScreen(
             enabled = state.result == null,
             singleLine = false,
             maxLines = 4,
+            trailingIcon = { MicButton(voice) },
         )
+        VoiceStatusText(voice)
 
         if (state.proposal == null) {
             Column(
@@ -63,7 +74,6 @@ fun CaptureScreen(
                     enabled = state.text.isNotBlank() && !state.interpreting,
                 ) { TextMMD(if (state.interpreting) "Interpreting…" else "Interpret") }
             }
-            SectionLabel("Voice capture arrives in Phase 11")
         } else {
             val proposal = state.proposal!!
             SectionLabel("Server proposal")

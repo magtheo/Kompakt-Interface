@@ -19,6 +19,7 @@ import kotlinx.serialization.json.jsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -69,6 +70,30 @@ class HttpApi(
             .url(url(path))
         requestId?.let { builder.header("X-Request-Id", it) }
         return execute(builder.build(), timeoutSeconds)
+    }
+
+    /** Raw POST with a multipart body (T-021 voice upload). Same failure
+     *  taxonomy as [post]; [timeoutSeconds] for long server work. */
+    suspend fun postMultipart(
+        path: String,
+        fileBytes: ByteArray,
+        filename: String,
+        contentType: String,
+        formFields: Map<String, String> = emptyMap(),
+        timeoutSeconds: Long? = null,
+    ): String {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .apply {
+                formFields.forEach { (name, value) -> addFormDataPart(name, value) }
+            }
+            .addFormDataPart(
+                "audio", filename,
+                fileBytes.toRequestBody(contentType.toMediaType()),
+            )
+            .build()
+        val request = Request.Builder().post(body).url(url(path)).build()
+        return execute(request, timeoutSeconds)
     }
 
     suspend inline fun <reified T> decode(
