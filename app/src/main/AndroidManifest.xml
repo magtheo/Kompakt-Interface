@@ -4,6 +4,10 @@
     <!-- Normal permission: granted at install, no runtime prompt. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- T-019: the app is its own notification client (no FCM). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:name=".KompaktApplication"
@@ -14,12 +18,25 @@
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Sideloaded/de-Googled: specialUse FGS holds the SSE stream.
+             (dataSync has a 6h OS cap on API 34+ — not viable for a
+             persistent connection; Play policy doesn't apply to us.) -->
+        <service
+            android:name=".notifications.AlertStreamService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="persistent-sse-alert-stream" />
+        </service>
     </application>
 
 </manifest>
