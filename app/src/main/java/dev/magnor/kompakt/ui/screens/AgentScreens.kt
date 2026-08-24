@@ -273,6 +273,7 @@ fun AgentRunDetailScreen(
     },
 ) {
     val run by viewModel.run.collectAsState()
+    val canSend by viewModel.canSend.collectAsState()
     val info by viewModel.backendInfo.collectAsState()
     val commands by viewModel.commands.collectAsState()
     val result by viewModel.result.collectAsState()
@@ -443,7 +444,10 @@ fun AgentRunDetailScreen(
                             value = message,
                             onValueChange = { message = it },
                             modifier = Modifier.weight(1f),
-                            placeholder = { TextMMD("Message the session") },
+                            enabled = canSend,
+                            placeholder = {
+                                TextMMD(if (canSend) "Message the session" else "Session running…")
+                            },
                             singleLine = false,
                             maxLines = 4,
                         )
@@ -452,7 +456,7 @@ fun AgentRunDetailScreen(
                                 viewModel.send(message)
                                 message = ""
                             },
-                            enabled = message.isNotBlank(),
+                            enabled = message.isNotBlank() && canSend,
                             modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
                         ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
                     }
@@ -474,7 +478,9 @@ fun AgentRunDetailScreen(
 /** Dialogue-style event row — same monochrome sender coding as chat (T-013). */
 @Composable
 private fun ChatEventRow(event: AgentEvent) {
-    val fromUser = event.kind.startsWith("user")
+    // Wire truth: sender lives in payload.role (kind is "message" on both
+    // adapters); kind-prefix is the legacy fallback for role-less wire.
+    val fromUser = (event.role ?: event.kind).startsWith("user")
     if (fromUser) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
             CardMMD(modifier = Modifier.fillMaxWidth(0.85f)) {

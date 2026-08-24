@@ -3,6 +3,7 @@ package dev.magnor.kompakt.data.remote
 import dev.magnor.kompakt.domain.OfflineException
 import dev.magnor.kompakt.domain.ProtocolNegotiation
 import dev.magnor.kompakt.domain.ProtocolVerdict
+import dev.magnor.kompakt.domain.RepositoryException
 import dev.magnor.kompakt.domain.RevisionConflictException
 import dev.magnor.kompakt.domain.ServerUnavailableException
 import dev.magnor.kompakt.domain.TaskStatus
@@ -194,6 +195,47 @@ class RemoteContractTest {
         }
         assertTrue(thrown is RevisionConflictException)
         assertEquals(8L, (thrown as RevisionConflictException).currentRevision)
+    }
+
+    @Test
+    fun `409 without a revision surfaces the server detail instead`() = runTest {
+        // Agents busy-409 (SessionBusyError while a turn runs) carries a
+        // plain detail — must NOT masquerade as a sync conflict.
+        server.enqueue(
+            MockResponse().setResponseCode(409)
+                .setBody("""{"detail":"session ses_1 busy: a turn is running"}"""),
+        )
+        var thrown: Exception? = null
+        try {
+            RemoteAgentRepository(api).send("ses_1", "hi", requestId = "r1")
+        } catch (e: Exception) {
+            thrown = e
+        }
+        assertTrue("expected RepositoryException, got $thrown", thrown is RepositoryException)
+        assertTrue(
+            "detail must surface the busy reason",
+            thrown?.message?.contains("busy") == true,
+        )
+    }
+
+    @Test
+    fun `agent event decode carries sender role from payload`() = runTest {
+        // Wire truth: kind="message", sender in payload.role.
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"events":[
+                    {"seq":1,"kind":"message","payload":{"role":"assistant","text":"OK"}},
+                    {"seq":2,"kind":"message","payload":{"role":"user","text":"again"}},
+                    {"seq":3,"kind":"state_change","payload":{"text":"idle"}}
+                ]}""",
+            ),
+        )
+        val events = RemoteAgentRepository(api).events("ses_1", since = 0)
+        assertEquals(3, events.size)
+        assertEquals("assistant", events[0].role)
+        assertEquals("user", events[1].role)
+        assertEquals(null, events[2].role) // non-message rows carry no role
+        assertEquals("OK", events[0].text)
     }
 
     @Test
