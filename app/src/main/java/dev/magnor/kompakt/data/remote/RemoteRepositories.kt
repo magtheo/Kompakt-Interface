@@ -280,6 +280,11 @@ class RemoteAgentRepository(private val api: HttpApi) : AgentRepository {
             fun toDomain(): AgentEvent = AgentEvent(
                 seq = seq,
                 kind = kind,
+                // Wire truth: both adapters emit kind="message" with the
+                // sender in payload.role (opencode today; warren can add it
+                // without a wire change). Kind stays as-is for non-message
+                // rows (state_change/error).
+                role = payload["role"]?.jsonPrimitive?.contentOrNull,
                 text = listOf("text", "message", "summary")
                     .firstNotNullOfOrNull { payload[it]?.jsonPrimitive?.contentOrNull }
                     ?.takeIf { it.isNotBlank() },

@@ -1,12 +1,16 @@
 package dev.magnor.kompakt.data.remote
 
 import dev.magnor.kompakt.domain.AgentDispatchDraft
+import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.ProtocolNegotiation
 import dev.magnor.kompakt.domain.ProtocolVerdict
 import dev.magnor.kompakt.domain.SteerOutcome
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -167,6 +171,66 @@ class LiveServerSmokeTest {
         assertTrue(
             "opencode executions are ses_… sessions, got ${dispatched.id}",
             dispatched.id.startsWith("ses_"),
+        )
+        assertTrue(
+            "dispatch without a project must yield a null ref (V-056 wire)",
+            dispatched.projectRef == null,
+        )
+
+        // T-017 resume leg: send a follow-up into the dispatched session —
+        // the coordinator's sync driver resumes the v1 turn; once settled,
+        // the durable evidence shows BOTH turns and the result carries the
+        // latest assistant message. Real-clock polling (IO delay bypasses
+        // runTest's virtual time), capped so a wedged backend fails fast.
+        //
+        // A busy turn answers send with 409 (SessionBusyError → honest
+        // conflict detail); the product gates the composer on canSend, so
+        // the test waits for turn one to settle first — same flow.
+        val settleDeadline = System.currentTimeMillis() + 45_000
+        var settled: AgentRun? = dispatched
+        while (System.currentTimeMillis() < settleDeadline) {
+            settled = agents.observeRun(dispatched.id).first()
+            val state = settled?.state
+            if (state != null && state != AgentRunState.QUEUED && state != AgentRunState.RUNNING) break
+            withContext(Dispatchers.IO) { delay(2_000) }
+        }
+        assertTrue(
+            "turn one must settle before send, state=${settled?.state}",
+            settled?.state != AgentRunState.QUEUED && settled?.state != AgentRunState.RUNNING,
+        )
+        val sent = agents.send(
+            dispatched.id,
+            "Reply with the single word DONE. Do not use any tools.",
+            requestId = "live-smoke-agents",
+        )
+        assertEquals("send keeps the session lane", "opencode", sent.backend)
+
+        var run: AgentRun? = dispatched
+        val deadline = System.currentTimeMillis() + 45_000
+        while (System.currentTimeMillis() < deadline) {
+            run = agents.observeRun(dispatched.id).first()
+            val state = run?.state
+            if (state != null && state != AgentRunState.QUEUED && state != AgentRunState.RUNNING) break
+            withContext(Dispatchers.IO) { delay(2_000) }
+        }
+        assertTrue(
+            "resumed turn must settle, state=${run?.state}",
+            run?.state == AgentRunState.IDLE || run?.state?.isTerminal == true,
+        )
+
+        // Wire truth: events carry kind="message" with sender in payload.role;
+        // OpenCode's session view does NOT project the initial dispatch
+        // prompt — durable evidence after resume = turn-1 assistant + the
+        // resumed user message + its assistant reply.
+        val roles = agents.events(dispatched.id, since = 0).map { it.role ?: it.kind }
+        assertTrue(
+            "durable evidence must show the resumed turn (user→assistant), got $roles",
+            roles.count { it == "user" } >= 1 && roles.count { it == "assistant" } >= 2,
+        )
+        val resumedResult = agents.result(dispatched.id)
+        assertTrue(
+            "result must reflect the resumed turn",
+            resumedResult?.summary?.contains("DONE", ignoreCase = true) == true,
         )
     }
 }

@@ -120,6 +120,7 @@ enum class SteerOutcome(val wire: String) {
 data class AgentEvent(
     val seq: Long,
     val kind: String,
+    val role: String? = null,
     val text: String? = null,
 )
 

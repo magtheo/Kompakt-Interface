@@ -24,16 +24,19 @@ import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.domain.TaskPatch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -54,9 +57,14 @@ private class ColdAgentRepository(
     var dispatchError: Exception? = null
     var dispatched = 0
 
+    /** Cold-fetch counters — the poll loop's observable footprint (T-017). */
+    var observeRunCalls = 0
+    var resultCalls = 0
+
     override fun observeSurface(): Flow<AgentsSurface> = flow { emit(surfaceSnapshot) }
     override fun observeRuns(): Flow<List<AgentRun>> = flow { emit(runsSnapshot.toList()) }
     override fun observeRun(id: String): Flow<AgentRun?> = flow {
+        observeRunCalls++
         emit(runsSnapshot.firstOrNull { it.id == id })
     }
 
@@ -86,7 +94,14 @@ private class ColdAgentRepository(
         mutate(runId) { it.copy(state = AgentRunState.CANCELLED) }
     }
 
-    override suspend fun result(runId: String): AgentRunResult? = null
+    override suspend fun result(runId: String): AgentRunResult? {
+        resultCalls++
+        val run = runsSnapshot.firstOrNull { it.id == runId } ?: return null
+        // The server yields a result only once the turn has settled.
+        return if (run.state.isTerminal || run.state == AgentRunState.IDLE) {
+            AgentRunResult(outcome = run.state, summary = "READY")
+        } else null
+    }
     override suspend fun events(runId: String, since: Long): List<AgentEvent> = emptyList()
     override suspend fun commands(backend: String): List<AgentCommand> =
         listOf(AgentCommand(name = "test", description = "Run the test suite"))
@@ -194,6 +209,10 @@ class AgentRunDetailViewModelTest {
 
     @After
     fun tearDown() {
+        // Note: no explicit VM clearing needed. The ticker is parked via the
+        // shared chain's onCompletion (WhileSubscribed grace) which runTest's
+        // teardown idling exercises — a test that ends with an active run
+        // still quiesces.
         Dispatchers.resetMain()
     }
 
@@ -209,14 +228,15 @@ class AgentRunDetailViewModelTest {
         state = state, title = "Readiness check", prompt = "Reply READY", createdAt = t0, updatedAt = t0,
     )
 
-    private fun vm(repo: ColdAgentRepository) = AgentRunDetailViewModel(
-        agentRepository = repo,
-        taskRepository = unusedTaskRepo,
-        noteRepository = unusedNoteRepo,
-        chatRepository = unusedChatRepo,
-        runId = "ses_1",
-        newRequestId = { "req-1" },
-    )
+    private fun vm(repo: ColdAgentRepository): AgentRunDetailViewModel =
+        AgentRunDetailViewModel(
+            agentRepository = repo,
+            taskRepository = unusedTaskRepo,
+            noteRepository = unusedNoteRepo,
+            chatRepository = unusedChatRepo,
+            runId = "ses_1",
+            newRequestId = { "req-1" },
+        )
 
     // Transitions (create task / save note / discuss) are not under test here —
     // stubs throw if ever reached.
@@ -276,6 +296,94 @@ class AgentRunDetailViewModelTest {
 
         assertEquals(AgentRunState.CANCELLED, vm.run.value?.state)
         assertEquals("Cancelled", vm.feedback.value)
+        collector.cancel()
+    }
+
+    // ---- T-017: poll while a turn runs, auto-settle when it lands ----
+    // These tests re-pin Main to the test scheduler so advanceTimeBy drives
+    // the ViewModel's poll delays; the eager dispatcher keeps the immediate
+    // semantics the vm() helper above was written against.
+
+    @Test
+    fun `running run settles via polling and pulls fresh evidence once`() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        val repo = ColdAgentRepository(surface(), mutableListOf(session(AgentRunState.RUNNING)))
+        val vm = vm(repo)
+        val collector = launch(UnconfinedTestDispatcher()) { vm.run.collect { } }
+
+        assertEquals(AgentRunState.RUNNING, vm.run.value?.state)
+        assertEquals(1, repo.observeRunCalls) // initial fetch, no poll yet
+
+        // The server settles the turn at t=12s — after the 10s poll ran.
+        launch { delay(12_000); repo.runsSnapshot[0] = repo.runsSnapshot[0].copy(state = AgentRunState.IDLE) }
+
+        advanceTimeBy(20_000) // polls at 5s,10s see RUNNING; the 15s fetch sees IDLE
+
+        assertEquals(AgentRunState.IDLE, vm.run.value?.state)
+        assertEquals("READY", vm.result.value?.summary) // evidence pulled on settle
+        assertEquals(2, repo.resultCalls) // init + settle — no per-poll result spam
+
+        val fetchesAtSettle = repo.observeRunCalls
+        advanceTimeBy(60_000) // polling must have stopped with the turn
+        assertEquals(fetchesAtSettle, repo.observeRunCalls)
+        collector.cancel()
+    }
+
+    @Test
+    fun `send on an idle session restarts polling until the resumed turn settles`() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        val repo = ColdAgentRepository(surface(), mutableListOf(session(AgentRunState.IDLE)))
+        val vm = vm(repo)
+        val collector = launch(UnconfinedTestDispatcher()) { vm.run.collect { } }
+
+        advanceTimeBy(30_000) // idle on open: polling must not start
+        assertEquals(1, repo.observeRunCalls)
+
+        // The resumed turn settles at t=42s (12s after the send at t≈30s).
+        launch { delay(12_000); repo.runsSnapshot[0] = repo.runsSnapshot[0].copy(state = AgentRunState.IDLE) }
+        vm.send("next instruction")
+
+        advanceTimeBy(20_000)
+
+        assertEquals(AgentRunState.IDLE, vm.run.value?.state)
+        assertEquals("READY", vm.result.value?.summary)
+
+        val fetchesAtSettle = repo.observeRunCalls
+        advanceTimeBy(60_000)
+        assertEquals(fetchesAtSettle, repo.observeRunCalls)
+        collector.cancel()
+    }
+
+    @Test
+    fun `terminal run on open never polls`() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        val repo = ColdAgentRepository(surface(), mutableListOf(session(AgentRunState.SUCCEEDED)))
+        val vm = vm(repo)
+        val collector = launch(UnconfinedTestDispatcher()) { vm.run.collect { } }
+
+        advanceTimeBy(60_000)
+
+        assertEquals(1, repo.observeRunCalls) // the one initial fetch
+        assertEquals(1, repo.resultCalls) // init evidence only
+        collector.cancel()
+    }
+
+    @Test
+    fun `canSend gates the composer on turn activity`() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        val repo = ColdAgentRepository(surface(), mutableListOf(session(AgentRunState.RUNNING)))
+        val vm = vm(repo)
+        // Collecting canSend opens the shared chain's gate — same lifecycle
+        // as the screen collecting run + canSend together.
+        val collector = launch(UnconfinedTestDispatcher()) { vm.canSend.collect { } }
+
+        assertFalse("busy turn must gate the composer", vm.canSend.value)
+
+        // The server settles the turn at t=12s; the poll lands it at t=15s.
+        launch { delay(12_000); repo.runsSnapshot[0] = repo.runsSnapshot[0].copy(state = AgentRunState.IDLE) }
+        advanceTimeBy(20_000)
+
+        assertTrue("settled session must be sendable", vm.canSend.value)
         collector.cancel()
     }
 }

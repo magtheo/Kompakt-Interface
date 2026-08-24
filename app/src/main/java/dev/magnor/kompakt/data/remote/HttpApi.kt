@@ -123,20 +123,38 @@ class HttpApi(
             when {
                 it.isSuccessful -> body
                 it.code == 401 -> throw UnauthorizedException()
-                it.code == 409 -> throw RevisionConflictException(
-                    currentRevision = parseRevision(body),
-                )
+                it.code == 409 -> throw conflict(body)
                 it.code in 500..599 -> throw ServerUnavailableException(it.code)
                 else -> throw RepositoryException("server rejected (HTTP ${it.code}): $body")
             }
         }
     }
 
-    private fun parseRevision(body: String): Long = try {
-        KompaktJson.decodeFromString<ConflictBody>(body).currentRevision ?: 0L
-    } catch (_: Exception) {
-        0L
+    /**
+     * A 409 is a revision conflict only when the server says so
+     * (`current_revision` present — sync endpoints). Agents busy-409s
+     * (SessionBusyError while a turn runs) carry a plain `detail`;
+     * surface that honestly instead of masquerading as a sync conflict.
+     */
+    private fun conflict(body: String): Exception {
+        val parsed = try {
+            KompaktJson.decodeFromString<ConflictBody>(body)
+        } catch (_: Exception) {
+            null
+        }
+        if (parsed?.currentRevision != null) {
+            return RevisionConflictException(currentRevision = parsed.currentRevision)
+        }
+        val detail = try {
+            KompaktJson.decodeFromString<ErrorBody>(body).detail
+        } catch (_: Exception) {
+            null
+        }
+        return RepositoryException(detail ?: "conflict: $body")
     }
+
+    @Serializable
+    private data class ErrorBody(val detail: String? = null)
 
     @Serializable
     private data class ConflictBody(@SerialName("current_revision") val currentRevision: Long? = null)

@@ -13,6 +13,7 @@ import dev.magnor.kompakt.domain.AgentEvent
 import dev.magnor.kompakt.domain.AgentRole
 import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.AgentRunResult
+import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.AgentsSurface
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.EntityKind
@@ -21,6 +22,8 @@ import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.TaskDraft
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +32,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
@@ -124,6 +130,15 @@ class AgentDetailViewModel(
  * re-collected on a refresh tick raised after every control action —
  * the status row then reflects server-side changes without re-entering
  * the screen (T-012).
+ *
+ * T-017: a dispatched or resumed turn runs for seconds-to-minutes
+ * server-side. While the shared run chain is subscribed (screen present,
+ * via the WhileSubscribed gate's onStart/onCompletion hooks) a ticker
+ * re-raises the refresh tick every [POLL_INTERVAL_MS] as long as the
+ * observed run is active; a settled run costs zero fetches, the ticker
+ * parks entirely when the screen leaves, and a resumed turn restarts
+ * polling through the next observed emission. When an active run is
+ * observed settling, the durable evidence (result + events) is pulled once.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AgentRunDetailViewModel(
@@ -140,8 +155,42 @@ class AgentRunDetailViewModel(
     private val tickedRun = refreshTick.flatMapLatest { agentRepository.observeRun(runId) }
     private val tickedSurface = refreshTick.flatMapLatest { agentRepository.observeSurface() }
 
+    /** True while an active run has been observed since the last settle. */
+    private var observedActive = false
+
     val run: StateFlow<AgentRun?> = tickedRun
+        .onEach { run ->
+            when {
+                run?.isActive == true -> observedActive = true
+                observedActive -> {
+                    // The turn just settled — pull the durable evidence once.
+                    observedActive = false
+                    refreshEvidence()
+                }
+            }
+        }
+        .onStart {
+            // T-017: the screen is present — run the poll-while-active ticker.
+            // This fires when the WhileSubscribed gate opens (with its grace),
+            // so the ticker's lifecycle is pinned to the shared chain rather
+            // than tracked by hand.
+            ensurePolling()
+        }
+        .onCompletion {
+            // Screen gone past the 5s grace — park the ticker.
+            stopPolling()
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * T-017: a busy turn answers send with 409 (SessionBusyError) — the
+     * composer is gated on turn activity instead of surfacing that as an
+     * error. Null run stays sendable; the composer hides itself until a
+     * run exists.
+     */
+    val canSend: StateFlow<Boolean> = run
+        .map { it?.isActive != true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
     val backendInfo: StateFlow<AgentBackendInfo?> = combine(
         tickedRun,
@@ -172,6 +221,32 @@ class AgentRunDetailViewModel(
 
     init {
         refreshEvidence()
+    }
+
+    private var pollJob: Job? = null
+
+    /**
+     * T-017 ticker: while the shared run chain is subscribed (screen
+     * present) and an active run has been observed, re-raise the refresh
+     * tick every [POLL_INTERVAL_MS]. The loop itself is nearly free while
+     * the run is settled — it only skips re-ticking — and [stopPolling]
+     * (from the chain's onCompletion) parks it entirely when the screen
+     * leaves. A settled run therefore costs zero fetches; a resumed turn
+     * restarts polling through observedActive on the next emission.
+     */
+    private fun ensurePolling() {
+        if (pollJob?.isActive == true) return
+        pollJob = viewModelScope.launch {
+            while (true) {
+                delay(POLL_INTERVAL_MS)
+                if (observedActive) refreshTick.value++
+            }
+        }
+    }
+
+    private fun stopPolling() {
+        pollJob?.cancel()
+        pollJob = null
     }
 
     /** Pull the durable evidence (result + event stream) once, on demand. */
@@ -271,4 +346,13 @@ class AgentRunDetailViewModel(
                 .onFailure { e -> _feedback.value = "Failed: ${e.message}" }
         }
     }
+
+    companion object {
+        /** Poll cadence while a turn runs; virtual-time-friendly in tests. */
+        const val POLL_INTERVAL_MS = 5_000L
+    }
 }
+
+/** A run worth polling: mid-turn states only (T-017). */
+private val AgentRun?.isActive: Boolean
+    get() = this?.state == AgentRunState.QUEUED || this?.state == AgentRunState.RUNNING
