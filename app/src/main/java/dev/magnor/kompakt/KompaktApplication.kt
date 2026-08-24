@@ -10,6 +10,8 @@ import dev.magnor.kompakt.data.FlushPolicy
 import dev.magnor.kompakt.data.ThemeStore
 import dev.magnor.kompakt.data.security.KeystoreSecretVault
 import dev.magnor.kompakt.notifications.AlertStreamService
+import dev.magnor.kompakt.notifications.AlertSyncWorker
+import dev.magnor.kompakt.notifications.installReminderPlanning
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +32,12 @@ class KompaktApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // T-020 — protocol §4.2: periodic fallback sync whenever the live
+        // SSE path is down (KEEP = enrollment flips never reset cadence).
+        AlertSyncWorker.schedule(this)
+        // T-020 — protocol §5: every Today projection refresh re-derives
+        // local reminders (remote mode only, guarded inside the hook).
+        installReminderPlanning(this)
         // Phase 9 — auto-flush parked captures the moment the default
         // network is usable again; no app restart needed. Callbacks hit
         // a connectivity thread; tryFlush hops to the container scope.
