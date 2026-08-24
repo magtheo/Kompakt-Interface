@@ -113,7 +113,7 @@ fun TodayScreen(
                     SectionLabel("Recent note")
                     projection.recentNote?.let { note ->
                         ListRow(
-                            title = note.preview,
+                            title = note.displayTitle,
                             subtitle = "Vault · ${note.updatedAt.relativeTo(viewModel.now)}",
                         )
                     } ?: ListRow(title = "No recent notes")

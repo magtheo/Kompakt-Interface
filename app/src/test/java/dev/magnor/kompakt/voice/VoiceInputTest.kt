@@ -11,6 +11,8 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -32,6 +34,34 @@ class VoiceInputTest {
     fun appendIntoDraftJoinsWithSpace() {
         assertEquals("buy milk tomorrow", appendTranscript("buy milk", "tomorrow"))
         assertEquals("a b", appendTranscript("a ", " b "))
+    }
+
+    // ---- insertAtSelection (T-022a note editor): cursor inserts ----
+
+    @Test
+    fun insertAtCursorSplicesTextAndMovesCursor() {
+        val value = TextFieldValue("helo world", selection = TextRange(4))
+        val next = insertAtSelection(value, " the")
+
+        assertEquals("helo the world", next.text)
+        assertEquals(8, next.selection.min) // cursor lands right after the insert
+    }
+
+    @Test
+    fun insertReplacesActiveSelection() {
+        val value = TextFieldValue("buy old thing", selection = TextRange(4, 7))
+        val next = insertAtSelection(value, "new")
+
+        assertEquals("buy new thing", next.text)
+        assertEquals(7, next.selection.min)
+    }
+
+    @Test
+    fun blankTranscriptIsANoOp() {
+        val value = TextFieldValue("same", selection = TextRange(2))
+        val next = insertAtSelection(value, "   ")
+
+        assertEquals(value, next)
     }
 
     // ---- controller state machine ----

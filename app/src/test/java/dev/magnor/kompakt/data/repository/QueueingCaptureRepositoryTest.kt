@@ -56,7 +56,7 @@ class QueueingCaptureRepositoryTest {
     fun `successful commit passes through and triggers flush`() = runTest {
         val queue = PendingCaptureStore(dir = null)
         var flushed = 0
-        val note = Note(id = "n1", text = "made it", createdAt = Instant.fromEpochSeconds(1))
+        val note = Note(id = "n1", text = "made it", createdAt = Instant.fromEpochSeconds(1), updatedAt = Instant.fromEpochSeconds(1))
         val repo = QueueingCaptureRepository(
             inner = StubInner { _, _ -> CaptureResult.NoteCreated(note) },
             queue = queue,

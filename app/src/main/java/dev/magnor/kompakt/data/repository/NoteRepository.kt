@@ -13,4 +13,11 @@ interface NoteRepository {
     suspend fun getNote(id: EntityId): Note?
 
     suspend fun createNote(draft: NoteDraft, requestId: RequestId): Note
+
+    /**
+     * Text write-through edit guarded by the file checksum (D028 v2).
+     * Stale checksum → [dev.magnor.kompakt.domain.NoteConflictException]
+     * carrying the fresh note; callers reload, never merge.
+     */
+    suspend fun updateNote(id: EntityId, text: String, expectedChecksum: String): Note
 }

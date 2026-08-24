@@ -4,6 +4,8 @@ import android.media.MediaRecorder
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import dev.magnor.kompakt.data.remote.HttpApi
 import dev.magnor.kompakt.domain.KompaktJson
 import dev.magnor.kompakt.domain.OfflineException
@@ -149,6 +151,32 @@ class VoiceInputController(
 fun appendTranscript(current: String, transcript: String): String =
     if (current.isBlank()) transcript.trim()
     else current.trimEnd() + " " + transcript.trim()
+
+/**
+ * Insert a voice transcript at the EDITOR CURSOR (note editor, T-022a):
+ * text before selection + transcript + text after, cursor lands right
+ * after the inserted text. Empty transcript → value unchanged.
+ */
+fun insertAtSelection(value: TextFieldValue, transcript: String): TextFieldValue {
+    val insert = transcript.trim()
+    if (insert.isEmpty()) return value
+    val text = value.text
+    val start = value.selection.min.coerceIn(0, text.length)
+    val end = value.selection.max.coerceIn(0, text.length)
+    val before = text.substring(0, start)
+    val after = text.substring(end)
+    // Voice transcripts are word-level content: space-join at the cursor
+    // (same philosophy as appendTranscript) so mid-sentence inserts never
+    // run into the preceding word.
+    val needsSpace = before.isNotEmpty() && !before.last().isWhitespace()
+    val payload = if (needsSpace) " $insert" else insert
+    val nextText = before + payload + after
+    val cursor = start + payload.length
+    return TextFieldValue(
+        text = nextText,
+        selection = TextRange(cursor),
+    )
+}
 
 /**
  * MediaRecorder-backed recorder: AAC in an MP4 container, 16 kHz mono —

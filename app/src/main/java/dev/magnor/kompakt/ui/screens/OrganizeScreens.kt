@@ -200,7 +200,7 @@ fun TasksScreen(
 
 @Composable
 fun NotesScreen(
-    onOpenItem: (EntityId) -> Unit,
+    onOpenNote: (EntityId) -> Unit,
     onBack: () -> Unit,
     viewModel: NotesViewModel = containerViewModel { NotesViewModel(it.noteRepository, it.now()) },
 ) {
@@ -210,13 +210,35 @@ fun NotesScreen(
         when {
             state.error != null -> ListRow(title = state.error ?: "Could not load")
             !state.loaded -> ListRow(title = "Loading…")
-            state.notes.isEmpty() -> ListRow(title = "No notes — capture one via +")
-            else -> state.notes.forEach { note ->
+            state.notes.isEmpty() -> {
+                // Teaching empty state: the pipeline is the mental model.
+                SectionLabel("Nothing here yet")
                 ListRow(
-                    title = note.preview,
-                    subtitle = note.updatedAt.relativeTo(viewModel.now),
-                    onClick = { onOpenItem(note.id) },
+                    title = "No notes — capture one with +",
+                    subtitle = "Voice or text captures land in the scratchpad, sort themselves into 00 - Inbox, and you file them from there.",
                 )
+            }
+            else -> {
+                val scratchpad = state.scratchpad
+                if (state.unprocessedCount > 0 && scratchpad != null) {
+                    ListRow(
+                        title = "Unprocessed (${state.unprocessedCount})",
+                        subtitle = "New captures waiting in the scratchpad",
+                        trailing = "•",
+                        onClick = { onOpenNote(scratchpad.id) },
+                    )
+                }
+                state.sections.forEach { section ->
+                    SectionLabel(section.label)
+                    section.notes.forEach { note ->
+                        ListRow(
+                            title = note.displayTitle,
+                            subtitle = note.listPreview.takeIf { it.isNotBlank() && it != note.displayTitle },
+                            trailing = note.updatedAt.relativeTo(viewModel.now),
+                            onClick = { onOpenNote(note.id) },
+                        )
+                    }
+                }
             }
         }
     }

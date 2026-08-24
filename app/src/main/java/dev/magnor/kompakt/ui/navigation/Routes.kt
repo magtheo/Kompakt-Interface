@@ -26,23 +26,25 @@ object Routes {
     /** Task list with optional project/area filter (dev plan §7). */
     const val TASKS_PATTERN = "organize/tasks?projectId={projectId}&areaId={areaId}"
     const val NOTES = "organize/notes"
+    const val NOTE_EDITOR = "organize/notes/{noteId}/edit"
     const val INBOX = "inbox"
     const val ITEM_DETAIL = "item/{itemId}"
     const val CAPTURE = "capture"
     const val SETTINGS = "settings"
     const val DIAGNOSTICS = "diagnostics"
 
-    /** All screen patterns — exactly one entry per Phase 1 screen (17). */
+    /** All screen patterns — exactly one entry per screen (18). */
     val all: List<String> = listOf(
         TODAY, CHAT_LIST, CHAT_THREAD, AGENTS_LIST, AGENT_DETAIL,
         AGENT_RUN_DETAIL, MORE, ORGANIZE, PROJECTS, AREAS, TASKS_PATTERN, NOTES,
-        INBOX, ITEM_DETAIL, CAPTURE, SETTINGS, DIAGNOSTICS,
+        NOTE_EDITOR, INBOX, ITEM_DETAIL, CAPTURE, SETTINGS, DIAGNOSTICS,
     )
 
     fun chatThread(id: String) = "chat/$id"
     fun agent(backend: String, name: String) = "agents/$backend/$name"
     fun run(id: String) = "runs/$id"
     fun item(id: String) = "item/$id"
+    fun noteEditor(id: String) = "organize/notes/$id/edit"
 
     /**
      * Deep-link route for an inbox / Today attention item (T-018).

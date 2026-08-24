@@ -40,6 +40,7 @@ import dev.magnor.kompakt.ui.screens.DiagnosticsScreen
 import dev.magnor.kompakt.ui.screens.InboxScreen
 import dev.magnor.kompakt.ui.screens.ItemDetailScreen
 import dev.magnor.kompakt.ui.screens.MoreScreen
+import dev.magnor.kompakt.ui.screens.NoteEditorScreen
 import dev.magnor.kompakt.ui.screens.NotesScreen
 import dev.magnor.kompakt.ui.screens.OrganizeScreen
 import dev.magnor.kompakt.ui.screens.ProjectsScreen
@@ -254,9 +255,20 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
                     },
                 )
             }
+            composable(
+                route = Routes.NOTE_EDITOR,
+                arguments = listOf(
+                    navArgument("noteId") { type = NavType.StringType },
+                ),
+            ) { entry ->
+                NoteEditorScreen(
+                    noteId = entry.arguments?.getString("noteId").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                )
+            }
             composable(Routes.NOTES) {
                 NotesScreen(
-                    onOpenItem = { navController.navigate(Routes.item(it)) },
+                    onOpenNote = { navController.navigate(Routes.noteEditor(it)) },
                     onBack = { navController.popBackStack() },
                 )
             }

@@ -109,7 +109,7 @@ class CaptureContractTest {
         )
         val result = repo.commit(proposal, requestId = "req-2")
         assertTrue(result is dev.magnor.kompakt.domain.CaptureResult.NoteCreated)
-        assertEquals("Idea about agent UI", (result as dev.magnor.kompakt.domain.CaptureResult.NoteCreated).note.preview)
+        assertEquals("Idea about agent UI", (result as dev.magnor.kompakt.domain.CaptureResult.NoteCreated).note.displayTitle)
     }
 
     @Test

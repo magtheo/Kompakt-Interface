@@ -257,6 +257,8 @@ class AgentRunDetailViewModelTest {
         override fun observeNote(id: EntityId) = throw UnsupportedOperationException()
         override suspend fun getNote(id: EntityId) = throw UnsupportedOperationException()
         override suspend fun createNote(draft: NoteDraft, requestId: RequestId) = throw UnsupportedOperationException()
+        override suspend fun updateNote(id: EntityId, text: String, expectedChecksum: String) =
+            throw UnsupportedOperationException()
     }
     private val unusedChatRepo = object : ChatRepository {
         override fun observeThreads() = throw UnsupportedOperationException()
