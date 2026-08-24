@@ -131,6 +131,9 @@ private fun KompaktNavHost() {
             composable(Routes.TODAY) {
                 TodayScreen(
                     onOpenInbox = { navController.navigate(Routes.INBOX) },
+                    onOpenAttention = { item ->
+                        navController.navigate(Routes.fromInboxItem(item))
+                    },
                     showInboxAction = surfaces.inboxEntry,
                     showAgentsSection = surfaces.agentsSectionOnToday,
                     showRecentNote = surfaces.recentNoteOnToday,
@@ -245,7 +248,9 @@ private fun KompaktNavHost() {
             }
             composable(Routes.INBOX) {
                 InboxScreen(
-                    onOpenItem = { navController.navigate(Routes.item(it)) },
+                    onOpenItem = { item ->
+                        navController.navigate(Routes.fromInboxItem(item))
+                    },
                     onBack = { navController.popBackStack() },
                 )
             }

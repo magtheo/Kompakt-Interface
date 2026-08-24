@@ -10,6 +10,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.RowScope
 import dev.magnor.kompakt.domain.TaskStatus
 import dev.magnor.kompakt.domain.AgentRunState
+import dev.magnor.kompakt.domain.EntityKind
+import dev.magnor.kompakt.domain.InboxItem
 import dev.magnor.kompakt.ui.containerViewModel
 import dev.magnor.kompakt.ui.relativeTo
 import dev.magnor.kompakt.ui.timeOfDay
@@ -22,6 +24,7 @@ import dev.magnor.kompakt.ui.viewmodels.TodayViewModel
 @Composable
 fun TodayScreen(
     onOpenInbox: () -> Unit,
+    onOpenAttention: (InboxItem) -> Unit = {},
     showInboxAction: Boolean = true,
     showAgentsSection: Boolean = true,
     showRecentNote: Boolean = true,
@@ -76,7 +79,17 @@ fun TodayScreen(
                             title = item.title,
                             subtitle = item.summary,
                             trailing = "●",
-                            onClick = onOpenInbox,
+                            // T-018: source-linked items deep-link; derived
+                            // alerts (no source) fall back to the Inbox view.
+                            onClick = {
+                                if (item.sourceType == EntityKind.AGENT_RUN &&
+                                    !item.sourceId.isNullOrBlank()
+                                ) {
+                                    onOpenAttention(item)
+                                } else {
+                                    onOpenInbox()
+                                }
+                            },
                         )
                     }
                 }

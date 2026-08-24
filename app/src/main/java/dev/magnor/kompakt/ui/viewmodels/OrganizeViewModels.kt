@@ -11,6 +11,7 @@ import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.EntityId
+import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.InboxItem
 import dev.magnor.kompakt.domain.Note
 import dev.magnor.kompakt.domain.Project
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.atStartOfDayIn
@@ -167,7 +169,7 @@ class NotesViewModel(
 
 /** Inbox — aggregated attention items; a view, not a source of truth. */
 class InboxViewModel(
-    inboxRepository: InboxRepository,
+    private val inboxRepository: InboxRepository,
     val now: Instant,
 ) : ViewModel() {
 
@@ -181,6 +183,20 @@ class InboxViewModel(
         .map { InboxUiState(loaded = true, items = it) }
         .catch { e -> emit(InboxUiState(loaded = true, error = e.userMessage())) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), InboxUiState())
+
+    /**
+     * T-018: opening an agent-run alert marks it read server-side
+     * (fire-and-forget — the list re-derives from the server on next load).
+     * Derived alerts (no persisted record) clear themselves.
+     */
+    fun markOpened(item: InboxItem) {
+        if (item.sourceType != EntityKind.AGENT_RUN) return
+        viewModelScope.launch {
+            runCatching {
+                inboxRepository.dismiss(item.id, item.revision, "open-${item.id}")
+            }
+        }
+    }
 }
 
 /**
