@@ -10,6 +10,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -56,18 +57,31 @@ import dev.magnor.kompakt.ui.viewmodels.TasksViewModel
  * and passes visibility down; screens never re-read capabilities.
  */
 @Composable
-fun KompaktApp(container: AppContainer) {
+fun KompaktApp(
+    container: AppContainer,
+    launchRoute: String? = null,
+    onRouteConsumed: () -> Unit = {},
+) {
     CompositionLocalProvider(LocalAppContainer provides container) {
-        KompaktNavHost()
+        KompaktNavHost(launchRoute, onRouteConsumed)
     }
 }
 
 @Composable
-private fun KompaktNavHost() {
+private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> Unit = {}) {
     val navController = rememberNavController()
     val appContainer = LocalAppContainer.current
     val caps by appContainer.capabilityStore.capabilities.collectAsState()
     val surfaces = remember(caps) { SurfaceGating.evaluate(caps) }
+
+    // T-019: one-shot external route (notification tap) — navigate once,
+    // then tell the source it's consumed so replays don't re-fire.
+    LaunchedEffect(launchRoute) {
+        launchRoute?.let {
+            navController.navigate(it)
+            onRouteConsumed()
+        }
+    }
 
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route

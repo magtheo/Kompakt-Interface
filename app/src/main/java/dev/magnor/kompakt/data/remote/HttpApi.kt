@@ -46,6 +46,9 @@ class HttpApi(
 ) {
     constructor(baseUrl: String, token: String) : this(baseUrl, { token })
 
+    /** Read-only token access for sibling transports (T-019 alert stream). */
+    fun token(): String? = tokenProvider()
+
     val base: HttpUrl = baseUrl.toHttpUrlOrNull()
         ?: throw IllegalArgumentException("invalid server URL: $baseUrl")
 

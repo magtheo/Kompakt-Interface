@@ -13,7 +13,9 @@ import dev.magnor.kompakt.data.fake.FakeSyncRepository
 import dev.magnor.kompakt.data.fake.FakeTaskRepository
 import dev.magnor.kompakt.data.fake.FakeTodayRepository
 import dev.magnor.kompakt.data.fake.IdempotencyRegistry
+import dev.magnor.kompakt.data.remote.AlertTransport
 import dev.magnor.kompakt.data.remote.HttpApi
+import dev.magnor.kompakt.data.remote.SseAlertTransport
 import dev.magnor.kompakt.data.remote.RemoteAgentRepository
 import dev.magnor.kompakt.data.remote.RemoteCaptureRepository
 import dev.magnor.kompakt.data.remote.RemoteChatRepository
@@ -215,6 +217,16 @@ class AppContainer(
     private var remoteStack: RemoteStack? = null
 
     /**
+     * T-019: live alert transport while remote mode is active — the
+     * notification service collects it. Null in fake mode.
+     */
+    var alertTransport: AlertTransport? = null
+        private set
+
+    /** Remote-active signal (fake↔remote flips) — drives the FGS lifecycle. */
+    val remoteActiveFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+    /**
      * Offline capture queue — commits parked while offline, re-sent with
      * the same request id once a remote stack is active.
      *
@@ -229,6 +241,8 @@ class AppContainer(
     private fun activateRemote(api: HttpApi) {
         val stack = RemoteStack(api)
         remoteStack = stack
+        alertTransport = SseAlertTransport(api.base.toString(), api::token)
+        remoteActiveFlow.value = true
         capabilityStore.refresh(stack.sync)
         // Connectivity (or enrollment) just (re)appeared — drain parked captures.
         scope.launch { flushPendingCaptures() }
@@ -236,6 +250,8 @@ class AppContainer(
 
     private fun deactivateRemote() {
         remoteStack = null
+        alertTransport = null
+        remoteActiveFlow.value = false
     }
 
     /** Manual capability re-fetch (Settings/Diagnostics retry hook). */
