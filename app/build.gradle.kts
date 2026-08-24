@@ -67,6 +67,9 @@ dependencies {
     // Navigation
     implementation(libs.androidx.navigation.compose)
 
+    // T-020: background fallback sync (protocol §4.2)
+    implementation(libs.androidx.work.runtime)
+
     // E-Ink design system
     implementation(libs.mudita.mmd)
 

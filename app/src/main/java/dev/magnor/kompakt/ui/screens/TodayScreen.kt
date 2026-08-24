@@ -28,7 +28,7 @@ fun TodayScreen(
     showInboxAction: Boolean = true,
     showAgentsSection: Boolean = true,
     showRecentNote: Boolean = true,
-    viewModel: TodayViewModel = containerViewModel { TodayViewModel(it.todayRepository, it.now()) },
+    viewModel: TodayViewModel = containerViewModel { TodayViewModel(it.todayRepository, it.now(), it.onTodayLoaded) },
 ) {
     val state by viewModel.state.collectAsState()
     val projection = state.projection

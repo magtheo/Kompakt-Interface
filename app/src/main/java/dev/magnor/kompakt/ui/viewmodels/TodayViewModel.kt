@@ -22,6 +22,7 @@ import kotlinx.datetime.Instant
 class TodayViewModel(
     todayRepository: TodayRepository,
     val now: Instant,
+    private val onLoaded: ((TodayProjection) -> Unit)? = null,
 ) : ViewModel() {
 
     data class TodayUiState(
@@ -31,7 +32,10 @@ class TodayViewModel(
     )
 
     val state: StateFlow<TodayUiState> = todayRepository.observeToday()
-        .map { TodayUiState(loaded = true, projection = it) }
+        .map {
+            onLoaded?.invoke(it) // T-020: local-reminder replan hook
+            TodayUiState(loaded = true, projection = it)
+        }
         .catch { e -> emit(TodayUiState(loaded = true, error = e.userMessage())) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TodayUiState())
 }

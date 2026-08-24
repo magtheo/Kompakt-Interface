@@ -238,6 +238,20 @@ class AppContainer(
      */
     val pendingCaptures = PendingCaptureStore(captureQueueDir)
 
+    /**
+     * T-020 — persisted alert dedupe shared by the SSE service and the
+     * fallback worker (declared before init for the same ordering
+     * reason as [pendingCaptures]).
+     */
+    val alertSeenStore = AlertSeenStore(captureQueueDir)
+
+    /**
+     * T-020 — Today-projection hook: KompaktApplication installs the
+     * local-reminder replan here (protocol §5). Null in tests / fake
+     * mode; invoked by TodayViewModel on each successful projection.
+     */
+    var onTodayLoaded: ((TodayProjection) -> Unit)? = null
+
     private fun activateRemote(api: HttpApi) {
         val stack = RemoteStack(api)
         remoteStack = stack
@@ -323,6 +337,9 @@ class AppContainer(
     }
 
     val remoteActive: Boolean get() = remoteStack != null
+
+    /** T-020: raw API for background paths (fallback worker). */
+    fun remoteApi(): HttpApi? = remoteStack?.api
 
     /**
      * Connectivity-triggered flush entry point (Phase 9). No-op when the
