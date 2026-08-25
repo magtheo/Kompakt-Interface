@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dev.magnor.kompakt.data.repository.AgentRepository
 import dev.magnor.kompakt.data.repository.ChatRepository
 import dev.magnor.kompakt.data.repository.NoteRepository
+import dev.magnor.kompakt.data.repository.OrganizationRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.AgentBackendInfo
@@ -19,6 +20,7 @@ import dev.magnor.kompakt.domain.AgentsSurface
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.NoteDraft
+import dev.magnor.kompakt.domain.Project
 import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.TaskDraft
@@ -156,6 +158,7 @@ class AgentRunDetailViewModel(
     private val taskRepository: TaskRepository,
     private val noteRepository: NoteRepository,
     private val chatRepository: ChatRepository,
+    private val organizationRepository: OrganizationRepository,
     private val runId: String,
     private val newRequestId: () -> RequestId,
 ) : ViewModel() {
@@ -313,7 +316,7 @@ class AgentRunDetailViewModel(
         "Task created: ${task.title}"
     }
 
-    fun saveNote() = transition { run ->
+    fun saveNote(project: Project? = null) = transition { run ->
         noteRepository.createNote(
             NoteDraft(
                 text = buildString {
@@ -321,13 +324,23 @@ class AgentRunDetailViewModel(
                     appendLine("Status: ${run.state.wire} (${run.backend}/${run.agent})")
                     run.resultSummary?.let { appendLine(it) }
                 }.trim(),
+                projectId = project?.id,
                 sourceType = EntityKind.AGENT_RUN,
                 sourceId = run.id,
             ),
             newRequestId(),
         )
-        "Note saved"
+        if (project == null) "Note saved" else "Note saved to ${project.name}"
     }
+
+    /**
+     * T-022e: vault projects eligible as save targets — the server (V-064)
+     * only accepts `vault:project:{slug}` ids; machine projects have no
+     * vault folder and 422, so they never appear in the picker.
+     */
+    val saveTargets: StateFlow<List<Project>> = organizationRepository.observeProjects()
+        .map { projects -> projects.filter { it.id.startsWith("vault:project:") } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun discussInChat() = transition { run ->
         chatRepository.createThread(ChatThreadDraft(title = run.displayTitle), newRequestId())

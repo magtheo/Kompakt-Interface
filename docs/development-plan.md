@@ -1106,7 +1106,7 @@ workspace registry + picker (V-061/T-022c), and chat scope tiers
 (V-062/V-063/T-022d: General / vault-seeded Topic / repo-bound
 Workspace with per-turn auto-commit).
 
-In flight: on-device smoke for T-022d; next client tasks T-022e, T-022b.
+In flight: on-device smoke for T-022d/T-022e (chat scopes + save-to-project); next client task T-022b.
 
 ---
 

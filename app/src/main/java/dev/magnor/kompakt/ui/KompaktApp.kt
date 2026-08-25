@@ -43,6 +43,7 @@ import dev.magnor.kompakt.ui.screens.MoreScreen
 import dev.magnor.kompakt.ui.screens.NoteEditorScreen
 import dev.magnor.kompakt.ui.screens.NotesScreen
 import dev.magnor.kompakt.ui.screens.OrganizeScreen
+import dev.magnor.kompakt.ui.screens.ProjectDetailScreen
 import dev.magnor.kompakt.ui.screens.ProjectsScreen
 import dev.magnor.kompakt.ui.screens.SettingsScreen
 import dev.magnor.kompakt.ui.screens.TasksScreen
@@ -208,9 +209,19 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
             composable(Routes.PROJECTS) {
                 ProjectsScreen(
                     onBack = { navController.popBackStack() },
-                    onOpenProjectTasks = { projectId ->
-                        navController.navigate(Routes.tasks(projectId = projectId))
+                    onOpenProject = { projectId ->
+                        navController.navigate(Routes.projectDetail(projectId))
                     },
+                )
+            }
+            composable(Routes.PROJECT_DETAIL) { entry ->
+                val projectId = entry.arguments?.getString("projectId").orEmpty()
+                ProjectDetailScreen(
+                    projectId = projectId,
+                    onBack = { navController.popBackStack() },
+                    onOpenChat = { navController.navigate(Routes.chatThread(it)) },
+                    onOpenNote = { navController.navigate(Routes.noteEditor(it)) },
+                    onOpenTasks = { navController.navigate(Routes.tasks(projectId = projectId)) },
                 )
             }
             composable(Routes.AREAS) {

@@ -316,6 +316,7 @@ fun AgentRunDetailScreen(
             taskRepository = it.taskRepository,
             noteRepository = it.noteRepository,
             chatRepository = it.chatRepository,
+            organizationRepository = it.organizationRepository,
             runId = runId,
             newRequestId = it::nextRequestId,
         )
@@ -328,10 +329,12 @@ fun AgentRunDetailScreen(
     val result by viewModel.result.collectAsState()
     val events by viewModel.events.collectAsState()
     val feedback by viewModel.feedback.collectAsState()
+    val targets by viewModel.saveTargets.collectAsState()
 
     var message by remember { mutableStateOf("") }
     var detailsOpen by remember { mutableStateOf(false) }
     var commandsOpen by remember { mutableStateOf(false) }
+    var noteTargetOpen by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     LaunchedEffect(events.size) {
@@ -452,7 +455,8 @@ fun AgentRunDetailScreen(
                     }
                 }
 
-                // Explicit transitions — compact row (D003).
+                // Explicit transitions — compact row (D003). Note opens the
+                // T-022e save-target picker (inbox + vault projects).
                 item(key = "transitions") {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButtonMMD(
@@ -464,9 +468,43 @@ fun AgentRunDetailScreen(
                             modifier = Modifier.weight(1f),
                         ) { TextMMD("Task") }
                         OutlinedButtonMMD(
-                            onClick = viewModel::saveNote,
+                            onClick = { noteTargetOpen = !noteTargetOpen },
                             modifier = Modifier.weight(1f),
                         ) { TextMMD("Note") }
+                    }
+                }
+
+                if (noteTargetOpen) {
+                    item(key = "note-targets") {
+                        Column {
+                            ButtonMMD(
+                                onClick = { noteTargetOpen = false },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { TextMMD("Save to… ▴") }
+                            ListRow(
+                                title = "Inbox",
+                                subtitle = "00 - Inbox (default)",
+                                onClick = {
+                                    noteTargetOpen = false
+                                    viewModel.saveNote(null)
+                                },
+                            )
+                            targets.forEach { project ->
+                                ListRow(
+                                    title = project.name,
+                                    subtitle = listOfNotNull(
+                                        project.currentGoal ?: project.nextAction,
+                                    ).joinToString(),
+                                    onClick = {
+                                        noteTargetOpen = false
+                                        viewModel.saveNote(project)
+                                    },
+                                )
+                            }
+                            if (targets.isEmpty()) {
+                                ListRow(title = "No vault projects — vault decides (D004)")
+                            }
+                        }
                     }
                 }
 

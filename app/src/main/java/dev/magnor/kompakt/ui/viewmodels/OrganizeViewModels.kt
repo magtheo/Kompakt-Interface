@@ -3,6 +3,7 @@ package dev.magnor.kompakt.ui.viewmodels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.magnor.kompakt.data.repository.AgentRepository
+import dev.magnor.kompakt.data.repository.ChatRepository
 import dev.magnor.kompakt.data.repository.InboxRepository
 import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.data.repository.OrganizationRepository
@@ -10,6 +11,7 @@ import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.Area
+import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.InboxItem
@@ -425,3 +427,60 @@ class ItemDetailViewModel(
 /** Agent activity helper for screens that show runs compactly. */
 fun AgentRun.isWaitingForInput(): Boolean =
     state == AgentRunState.WAITING_FOR_INPUT
+
+/**
+ * T-022e: a project's context surface — workspace-scoped chats that belong to
+ * the project (client-side join over existing lists) + project-filtered notes.
+ * Tasks stay one tap deeper (existing filter route, nothing duplicated).
+ */
+class ProjectDetailViewModel(
+    organizationRepository: OrganizationRepository,
+    noteRepository: NoteRepository,
+    chatRepository: ChatRepository,
+    projectId: EntityId,
+) : ViewModel() {
+
+    data class ProjectDetailUiState(
+        val loaded: Boolean = false,
+        val error: String? = null,
+        val project: Project? = null,
+        val chats: List<ChatThread> = emptyList(),
+        val notes: List<Note> = emptyList(),
+    )
+
+    val state: StateFlow<ProjectDetailUiState> = combine(
+        organizationRepository.observeProject(projectId),
+        noteRepository.observeNotes(projectId = projectId),
+        chatRepository.observeThreads(),
+    ) { project, notes, chats ->
+        val ref = workspaceRefFor(projectId)
+        ProjectDetailUiState(
+            loaded = true,
+            project = project,
+            notes = notes,
+            chats = if (ref == null) {
+                emptyList()
+            } else {
+                chats.filter { it.scopeType == "workspace" && it.scopeRef == ref }
+            },
+        )
+    }.catch { e -> emit(ProjectDetailUiState(loaded = true, error = e.userMessage())) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProjectDetailUiState())
+
+    companion object {
+        /**
+         * Workspace chats bind a repo-dir slug; project ids carry it after the
+         * last `:`. Vault ids already ARE slugs (server slugify); machine repo
+         * ids get the client mirror (lowercase, spaces→hyphens — server-side
+         * slug overrides not replicated, documented limitation).
+         */
+        fun workspaceRefFor(projectId: EntityId): String? = when {
+            projectId.startsWith("vault:project:") ->
+                projectId.removePrefix("vault:project:")
+            projectId.startsWith("machine:project:") ->
+                projectId.removePrefix("machine:project:")
+                    .lowercase().replace(' ', '-')
+            else -> null
+        }
+    }
+}

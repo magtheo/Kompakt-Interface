@@ -20,6 +20,7 @@ object Routes {
     const val MORE = "more"
     const val ORGANIZE = "organize"
     const val PROJECTS = "organize/projects"
+    const val PROJECT_DETAIL = "organize/projects/{projectId}"
     const val AREAS = "organize/areas"
     const val TASKS = "organize/tasks"
 
@@ -33,17 +34,19 @@ object Routes {
     const val SETTINGS = "settings"
     const val DIAGNOSTICS = "diagnostics"
 
-    /** All screen patterns — exactly one entry per screen (18). */
+    /** All screen patterns — exactly one entry per screen (19). */
     val all: List<String> = listOf(
         TODAY, CHAT_LIST, CHAT_THREAD, AGENTS_LIST, AGENT_DETAIL,
-        AGENT_RUN_DETAIL, MORE, ORGANIZE, PROJECTS, AREAS, TASKS_PATTERN, NOTES,
-        NOTE_EDITOR, INBOX, ITEM_DETAIL, CAPTURE, SETTINGS, DIAGNOSTICS,
+        AGENT_RUN_DETAIL, MORE, ORGANIZE, PROJECTS, PROJECT_DETAIL, AREAS,
+        TASKS_PATTERN, NOTES, NOTE_EDITOR, INBOX, ITEM_DETAIL, CAPTURE,
+        SETTINGS, DIAGNOSTICS,
     )
 
     fun chatThread(id: String) = "chat/$id"
     fun agent(backend: String, name: String) = "agents/$backend/$name"
     fun run(id: String) = "runs/$id"
     fun item(id: String) = "item/$id"
+    fun projectDetail(id: String) = "organize/projects/$id"
     fun noteEditor(id: String) = "organize/notes/$id/edit"
 
     /**
