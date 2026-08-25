@@ -9,6 +9,7 @@ import dev.magnor.kompakt.data.repository.OrganizationRepository
 import dev.magnor.kompakt.data.repository.SyncRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
+import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.AgentBackendInfo
 import dev.magnor.kompakt.domain.AgentCommand
 import dev.magnor.kompakt.domain.AgentDispatchDraft
@@ -48,8 +49,10 @@ import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.domain.TaskPatch
 import dev.magnor.kompakt.domain.TaskStatus
 import dev.magnor.kompakt.domain.TodayProjection
+import dev.magnor.kompakt.domain.Workspace
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -637,4 +640,11 @@ class FakeSyncRepository(
     override suspend fun markSynced(requestId: RequestId) {
         lastSync.value = now()
     }
+}
+
+/** T-022c: demo workspaces come straight from FakeData — a read-only surface. */
+class FakeWorkspaceRepository(
+    private val workspaces: StateFlow<List<Workspace>>,
+) : WorkspaceRepository {
+    override fun observeWorkspaces(): Flow<List<Workspace>> = workspaces
 }

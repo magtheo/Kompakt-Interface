@@ -12,6 +12,7 @@ import dev.magnor.kompakt.data.fake.FakeStore
 import dev.magnor.kompakt.data.fake.FakeSyncRepository
 import dev.magnor.kompakt.data.fake.FakeTaskRepository
 import dev.magnor.kompakt.data.fake.FakeTodayRepository
+import dev.magnor.kompakt.data.fake.FakeWorkspaceRepository
 import dev.magnor.kompakt.data.fake.IdempotencyRegistry
 import dev.magnor.kompakt.data.remote.AlertTransport
 import dev.magnor.kompakt.data.remote.HttpApi
@@ -25,6 +26,7 @@ import dev.magnor.kompakt.data.remote.RemoteOrganizationRepository
 import dev.magnor.kompakt.data.remote.RemoteSyncRepository
 import dev.magnor.kompakt.data.remote.RemoteTaskRepository
 import dev.magnor.kompakt.data.remote.RemoteTodayRepository
+import dev.magnor.kompakt.data.remote.RemoteWorkspaceRepository
 import dev.magnor.kompakt.data.repository.AgentRepository
 import dev.magnor.kompakt.data.repository.CaptureRepository
 import dev.magnor.kompakt.data.repository.ChatRepository
@@ -35,6 +37,7 @@ import dev.magnor.kompakt.data.repository.QueueingCaptureRepository
 import dev.magnor.kompakt.data.repository.SyncRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
+import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.data.security.InMemorySecretVault
 import dev.magnor.kompakt.data.security.SecretVault
 import dev.magnor.kompakt.domain.AgentCommand
@@ -68,6 +71,7 @@ import dev.magnor.kompakt.domain.Task
 import dev.magnor.kompakt.domain.TaskDraft
 import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.domain.TaskPatch
+import dev.magnor.kompakt.domain.Workspace
 import dev.magnor.kompakt.domain.TodayProjection
 import dev.magnor.kompakt.domain.UnauthorizedException
 import kotlinx.coroutines.CoroutineScope
@@ -163,6 +167,9 @@ class AppContainer(
         runs = fakeRuns,
         idempotency = idempotency, nextId = ::nextId, now = now,
     )
+    private val fakeWorkspaces = FakeWorkspaceRepository(
+        workspaces = MutableStateFlow(FakeData.workspaces),
+    )
     private val fakeTasks = FakeTaskRepository(
         tasks = taskStore, idempotency = idempotency, nextId = { nextId("task") }, now = now,
     )
@@ -210,6 +217,7 @@ class AppContainer(
         val inbox = RemoteInboxRepository(api)
         val chats = RemoteChatRepository(api)
         val agents = RemoteAgentRepository(api)
+        val workspaces = RemoteWorkspaceRepository(api)
         val capture = RemoteCaptureRepository(api)
     }
 
@@ -299,6 +307,7 @@ class AppContainer(
 
     val chatRepository: ChatRepository = SwitchChat()
     val agentRepository: AgentRepository = SwitchAgent()
+    val workspaceRepository: WorkspaceRepository = SwitchWorkspace()
     val taskRepository: TaskRepository = SwitchTask()
     val noteRepository: NoteRepository = SwitchNote()
     val organizationRepository: OrganizationRepository = SwitchOrganization()
@@ -385,6 +394,11 @@ class AppContainer(
         override suspend fun commands(backend: String): List<AgentCommand> = cur().commands(backend)
         override suspend fun runCommand(runId: String, command: String, arguments: String, requestId: RequestId): AgentRun =
             cur().runCommand(runId, command, arguments, requestId)
+    }
+
+    private inner class SwitchWorkspace : WorkspaceRepository {
+        private fun cur(): WorkspaceRepository = remoteStack?.workspaces ?: fakeWorkspaces
+        override fun observeWorkspaces(): Flow<List<Workspace>> = cur().observeWorkspaces()
     }
 
     private inner class SwitchTask : TaskRepository {

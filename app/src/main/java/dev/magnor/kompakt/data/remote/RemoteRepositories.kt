@@ -9,6 +9,7 @@ import dev.magnor.kompakt.data.repository.OrganizationRepository
 import dev.magnor.kompakt.data.repository.SyncRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
+import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.AgentCommand
 import dev.magnor.kompakt.domain.AgentDispatchDraft
 import dev.magnor.kompakt.domain.AgentEvent
@@ -38,6 +39,7 @@ import dev.magnor.kompakt.domain.Task
 import dev.magnor.kompakt.domain.TaskDraft
 import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.domain.TaskPatch
+import dev.magnor.kompakt.domain.Workspace
 import dev.magnor.kompakt.domain.TodayProjection
 import dev.magnor.kompakt.domain.KompaktJson
 import kotlinx.coroutines.flow.Flow
@@ -441,5 +443,12 @@ class RemoteCaptureRepository(private val api: HttpApi) : CaptureRepository {
             } ?: throw RepositoryException("server confirmed a note without a note payload")
             else -> throw RepositoryException("unknown capture result: ${response.kind}")
         }
+    }
+}
+
+/** T-022c: workspace registry read — reference data, {ref, label} only. */
+class RemoteWorkspaceRepository(private val api: HttpApi) : WorkspaceRepository {
+    override fun observeWorkspaces(): Flow<List<Workspace>> = flow {
+        emit(api.decodeList("/v1/workspaces", "workspaces"))
     }
 }

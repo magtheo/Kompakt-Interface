@@ -4,6 +4,7 @@ import dev.magnor.kompakt.data.repository.AgentRepository
 import dev.magnor.kompakt.data.repository.ChatRepository
 import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
+import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.AgentBackendInfo
 import dev.magnor.kompakt.domain.AgentCommand
 import dev.magnor.kompakt.domain.AgentDispatchDraft
@@ -22,6 +23,7 @@ import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.TaskDraft
 import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.domain.TaskPatch
+import dev.magnor.kompakt.domain.Workspace
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -56,6 +58,7 @@ private class ColdAgentRepository(
 
     var dispatchError: Exception? = null
     var dispatched = 0
+    var lastDraft: AgentDispatchDraft? = null
 
     /** Cold-fetch counters — the poll loop's observable footprint (T-017). */
     var observeRunCalls = 0
@@ -70,6 +73,7 @@ private class ColdAgentRepository(
 
     override suspend fun dispatch(draft: AgentDispatchDraft, requestId: RequestId): AgentRun {
         dispatched++
+        lastDraft = draft
         dispatchError?.let { throw it }
         val run = AgentRun(
             id = "ses_new_${runsSnapshot.size + 1}",
@@ -120,6 +124,13 @@ private class ColdAgentRepository(
 @OptIn(ExperimentalCoroutinesApi::class)
 class AgentDetailViewModelTest {
 
+    /** T-022c: picker source — cold one-shot, same semantics as the remote repo. */
+    private class TestWorkspaceRepository(
+        private val workspaces: List<Workspace> = emptyList(),
+    ) : WorkspaceRepository {
+        override fun observeWorkspaces(): Flow<List<Workspace>> = flow { emit(workspaces) }
+    }
+
     private val t0 = Instant.parse("2026-08-23T12:00:00Z")
 
     @Before
@@ -148,7 +159,7 @@ class AgentDetailViewModelTest {
     @Test
     fun `dispatch refreshes the runs list without re-entering the screen`() = runTest {
         val repo = ColdAgentRepository(surface(), mutableListOf(earlierRun("ses_1")))
-        val vm = AgentDetailViewModel(repo, "opencode", "build") { "req-1" }
+        val vm = AgentDetailViewModel(repo, TestWorkspaceRepository(), "opencode", "build") { "req-1" }
         val roleCollector = launch(UnconfinedTestDispatcher()) { vm.role.collect { } }
         val runsCollector = launch(UnconfinedTestDispatcher()) { vm.runs.collect { } }
         assertEquals(1, vm.runs.value.size)
@@ -168,7 +179,7 @@ class AgentDetailViewModelTest {
     @Test
     fun `dispatch exposes the run for the tappable open row`() = runTest {
         val repo = ColdAgentRepository(surface(), mutableListOf())
-        val vm = AgentDetailViewModel(repo, "opencode", "build") { "req-1" }
+        val vm = AgentDetailViewModel(repo, TestWorkspaceRepository(), "opencode", "build") { "req-1" }
         val roleCollector = launch(UnconfinedTestDispatcher()) { vm.role.collect { } }
         val runsCollector = launch(UnconfinedTestDispatcher()) { vm.runs.collect { } }
 
@@ -185,7 +196,7 @@ class AgentDetailViewModelTest {
     fun `dispatch failure keeps feedback and does not expose a run`() = runTest {
         val repo = ColdAgentRepository(surface(), mutableListOf())
         repo.dispatchError = RuntimeException("connection refused")
-        val vm = AgentDetailViewModel(repo, "opencode", "build") { "req-1" }
+        val vm = AgentDetailViewModel(repo, TestWorkspaceRepository(), "opencode", "build") { "req-1" }
         val roleCollector = launch(UnconfinedTestDispatcher()) { vm.role.collect { } }
 
         vm.dispatch("will fail", null)
@@ -193,6 +204,35 @@ class AgentDetailViewModelTest {
         assertTrue(vm.feedback.value?.startsWith("Dispatch failed") == true)
         assertNull(vm.lastDispatched.value)
         assertTrue(vm.runs.value.isEmpty())
+        roleCollector.cancel()
+    }
+
+    @Test
+    fun `workspaces flow feeds the picker`() = runTest {
+        val repo = ColdAgentRepository(surface(), mutableListOf())
+        val vm = AgentDetailViewModel(
+            repo,
+            TestWorkspaceRepository(listOf(Workspace(ref = "evershift", label = "Evershift"))),
+            "opencode", "build",
+        ) { "req-1" }
+        val collector = launch(UnconfinedTestDispatcher()) { vm.workspaces.collect { } }
+
+        assertEquals(1, vm.workspaces.value.size)
+        assertEquals("evershift", vm.workspaces.value.first().ref)
+        collector.cancel()
+    }
+
+    @Test
+    fun `dispatch carries the picked workspace ref into the draft`() = runTest {
+        val repo = ColdAgentRepository(surface(), mutableListOf())
+        val vm = AgentDetailViewModel(repo, TestWorkspaceRepository(), "opencode", "build") { "req-1" }
+        val roleCollector = launch(UnconfinedTestDispatcher()) { vm.role.collect { } }
+        val runsCollector = launch(UnconfinedTestDispatcher()) { vm.runs.collect { } }
+
+        vm.dispatch("Check the build", "evershift")
+
+        assertEquals("evershift", repo.lastDraft?.projectRef)
+        runsCollector.cancel()
         roleCollector.cancel()
     }
 }
