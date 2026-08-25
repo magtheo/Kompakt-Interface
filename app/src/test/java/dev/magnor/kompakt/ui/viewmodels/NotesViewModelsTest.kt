@@ -118,6 +118,8 @@ class NotesViewModelsTest {
 
     private fun editor(id: String = "n-1") = NoteEditorViewModel(
         noteRepository = repo,
+        taskRepository = idleTasks,
+        organizationRepository = emptyOrg,
         noteId = id,
         newRequestId = { "req-1" },
         now = { t0 },
@@ -255,4 +257,22 @@ class NotesViewModelsTest {
             return updated
         }
     }
+}
+
+/** T-022b: triage deps the editor never exercises in these tests. */
+private val idleTasks = object : dev.magnor.kompakt.data.repository.TaskRepository {
+    override fun observeTasks(filter: dev.magnor.kompakt.domain.TaskFilter): kotlinx.coroutines.flow.Flow<List<dev.magnor.kompakt.domain.Task>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    override fun observeTask(id: dev.magnor.kompakt.domain.EntityId): kotlinx.coroutines.flow.Flow<dev.magnor.kompakt.domain.Task?> = kotlinx.coroutines.flow.flowOf(null)
+    override suspend fun getTask(id: dev.magnor.kompakt.domain.EntityId): dev.magnor.kompakt.domain.Task? = null
+    override suspend fun createTask(draft: dev.magnor.kompakt.domain.TaskDraft, requestId: dev.magnor.kompakt.domain.RequestId): dev.magnor.kompakt.domain.Task = throw UnsupportedOperationException()
+    override suspend fun completeTask(id: dev.magnor.kompakt.domain.EntityId, expectedRevision: Long, requestId: dev.magnor.kompakt.domain.RequestId): dev.magnor.kompakt.domain.Task = throw UnsupportedOperationException()
+    override suspend fun postponeTask(id: dev.magnor.kompakt.domain.EntityId, expectedRevision: Long, newDueAt: kotlinx.datetime.Instant?, requestId: dev.magnor.kompakt.domain.RequestId): dev.magnor.kompakt.domain.Task = throw UnsupportedOperationException()
+    override suspend fun updateTask(id: dev.magnor.kompakt.domain.EntityId, expectedRevision: Long, patch: dev.magnor.kompakt.domain.TaskPatch, requestId: dev.magnor.kompakt.domain.RequestId): dev.magnor.kompakt.domain.Task = throw UnsupportedOperationException()
+}
+
+private val emptyOrg = object : dev.magnor.kompakt.data.repository.OrganizationRepository {
+    override fun observeProjects(): kotlinx.coroutines.flow.Flow<List<dev.magnor.kompakt.domain.Project>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    override fun observeProject(id: dev.magnor.kompakt.domain.EntityId): kotlinx.coroutines.flow.Flow<dev.magnor.kompakt.domain.Project?> = kotlinx.coroutines.flow.flowOf(null)
+    override fun observeAreas(): kotlinx.coroutines.flow.Flow<List<dev.magnor.kompakt.domain.Area>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    override fun observeArea(id: dev.magnor.kompakt.domain.EntityId): kotlinx.coroutines.flow.Flow<dev.magnor.kompakt.domain.Area?> = kotlinx.coroutines.flow.flowOf(null)
 }

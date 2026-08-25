@@ -452,7 +452,13 @@ Implemented model (D028):
   checksum it loaded — if the file changed underneath, the server
   answers 409 with the fresh copy, the editor reloads, nothing is lost,
 - deliberate note saves create individual files under `00 - Inbox/`;
-  quick captures keep using the scratchpad commit path.
+  quick captures keep using the scratchpad commit path,
+- a sectioned scratchpad opens read-view as per-section triage cards
+  (T-022b): New note in… / Append to… / Create task / Keep / Discard.
+  Consuming actions perform the external effect first and remove the
+  source section second — a crash in between duplicates the section,
+  never loses it. Create task derives without consuming; Discard's
+  undo is git history.
 
 ---
 
@@ -582,6 +588,11 @@ Task → Open project
 Note → Discuss in chat
 Note → Create task
 ```
+
+Implemented so far: Chat → Save as note (T-022b — verbatim reply
+snapshot, chat provenance in frontmatter, assistant messages only) and
+Note → Create task (T-022b — derive-only, the section is not consumed).
+The rest remain deliberate future transitions, never automatic.
 
 These transitions should always be visible.
 

@@ -3,15 +3,18 @@ package dev.magnor.kompakt.ui.viewmodels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.magnor.kompakt.data.repository.ChatRepository
+import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.data.repository.TopicRepository
 import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.ChatTopic
 import dev.magnor.kompakt.domain.EntityId
+import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
+import dev.magnor.kompakt.domain.NoteDraft
 import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.Workspace
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -120,6 +123,7 @@ class ChatThreadViewModel(
     private val chatRepository: ChatRepository,
     topicRepository: TopicRepository,
     workspaceRepository: WorkspaceRepository,
+    private val noteRepository: NoteRepository,
     private val threadId: EntityId,
     private val newRequestId: () -> RequestId,
     private val now: () -> Instant,
@@ -200,6 +204,28 @@ class ChatThreadViewModel(
 
     fun dismissNotice() {
         _notice.value = null
+    }
+
+    /**
+     * T-022b: save an assistant reply as an inbox note — an explicit
+     * transition, never automatic. Text is the content snapshot (precision
+     * loss zero); the thread id rides source_id for provenance.
+     */
+    fun saveNote(message: Message) {
+        if (message.role != MessageRole.ASSISTANT) return
+        viewModelScope.launch {
+            runCatching {
+                noteRepository.createNote(
+                    NoteDraft(
+                        text = message.content,
+                        sourceType = EntityKind.CHAT,
+                        sourceId = threadId,
+                    ),
+                    newRequestId(),
+                )
+            }.onSuccess { _notice.value = "Note saved: ${it.displayTitle}" }
+                .onFailure { e -> _notice.value = "Note save failed: ${e.message}" }
+        }
     }
 
     /** T-022d: apply the proposed topic — the chip's explicit Move action. */

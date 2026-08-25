@@ -1,6 +1,7 @@
 package dev.magnor.kompakt.ui.viewmodels
 
 import dev.magnor.kompakt.data.repository.ChatRepository
+import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.data.repository.TopicRepository
 import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.ChatExchange
@@ -8,9 +9,12 @@ import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.ChatTopic
 import dev.magnor.kompakt.domain.EntityId
+import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
+import dev.magnor.kompakt.domain.Note
+import dev.magnor.kompakt.domain.NoteDraft
 import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.Workspace
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +40,28 @@ private object StaticTopics : TopicRepository {
     override fun observeTopics(): Flow<List<ChatTopic>> =
         flowOf(listOf(ChatTopic(id = "evershift", label = "Evershift")))
 }
+
+/** T-022b: records save-note drafts; observe is never used by the VM path. */
+private class ColdNoteRepository : NoteRepository {
+    val createdDrafts = mutableListOf<NoteDraft>()
+    var createOutcome: (NoteDraft) -> Note = { draft ->
+        Note(id = "note_saved", text = draft.text, createdAt = t0Note, updatedAt = t0Note)
+    }
+    override fun observeNotes(projectId: EntityId?, areaId: EntityId?): Flow<List<Note>> = flowOf(emptyList())
+    override fun observeNote(id: EntityId): Flow<Note?> = flowOf(null)
+    override suspend fun getNote(id: EntityId): Note? = null
+    override suspend fun createNote(draft: NoteDraft, requestId: RequestId): Note {
+        createdDrafts += draft
+        return createOutcome(draft)
+    }
+    override suspend fun updateNote(id: EntityId, text: String, expectedChecksum: String): Note =
+        throw UnsupportedOperationException()
+}
+
+private val t0Note = Instant.parse("2026-08-25T12:00:00Z")
+
+/** Shared idle instance — existing tests never touch the note path. */
+private val StaticNotes = ColdNoteRepository()
 
 private object StaticWorkspaces : WorkspaceRepository {
     override fun observeWorkspaces(): Flow<List<Workspace>> =
@@ -138,7 +164,7 @@ class ChatThreadViewModelTest {
             repo.snapshot = listOf(user, assistant)
             ChatExchange(user, assistant)
         }
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-${tick++}" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-${tick++}" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) {
             vm.messages.collect { /* keep the StateFlow hot */ }
         }
@@ -161,7 +187,7 @@ class ChatThreadViewModelTest {
     fun `send failure removes optimistic row and restores draft for retry`() = runTest {
         repo = ColdChatRepository(snapshot = emptyList())
         repo.sendOutcome = { _, _ -> throw RuntimeException("connection refused") }
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-x" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-x" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) {
             vm.messages.collect { }
         }
@@ -189,7 +215,7 @@ class ChatThreadViewModelTest {
             ChatExchange(user, null)
         }
         var counter = 0
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-${counter++}" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-${counter++}" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) {
             vm.messages.collect { }
         }
@@ -207,7 +233,7 @@ class ChatThreadViewModelTest {
     @Test
     fun `blank send is a no-op`() = runTest {
         repo = ColdChatRepository(snapshot = emptyList())
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req" }, { t0 })
         vm.onDraftChange("   ")
         vm.send()
         assertTrue(repo.sentRequestIds.isEmpty())
@@ -226,7 +252,7 @@ class ChatThreadViewModelTest {
     @Test
     fun `revert keeps the prefix through the anchor and drops the rest`() = runTest {
         repo = ColdChatRepository(snapshot = seededConversation())
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-t" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-t" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
 
         vm.revertTo(msg("u2", MessageRole.USER, "second question"))
@@ -241,7 +267,7 @@ class ChatThreadViewModelTest {
     fun `revert failure surfaces a notice and leaves history intact`() = runTest {
         repo = ColdChatRepository(snapshot = seededConversation())
         repo.truncateOutcome = { throw RuntimeException("server said no") }
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-t" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-t" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
 
         vm.revertTo(msg("u1", MessageRole.USER, "first question"))
@@ -260,7 +286,7 @@ class ChatThreadViewModelTest {
             repo.snapshot = repo.snapshot + listOf(user, assistant)
             ChatExchange(user, assistant)
         }
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-e" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-e" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
 
         vm.beginEdit(msg("u2", MessageRole.USER, "second question"))
@@ -285,7 +311,7 @@ class ChatThreadViewModelTest {
     fun `edit failure restores the draft and does not send`() = runTest {
         repo = ColdChatRepository(snapshot = seededConversation())
         repo.truncateOutcome = { throw RuntimeException("offline") }
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-e" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-e" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
 
         vm.beginEdit(msg("u2", MessageRole.USER, "second question"))
@@ -315,7 +341,7 @@ class ChatThreadViewModelTest {
             )
             ChatExchange(user, assistant)
         }
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-r" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-r" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
 
         vm.regenerate()
@@ -348,7 +374,7 @@ class ChatThreadViewModelTest {
             repo.snapshot = listOf(user, assistant)
             ChatExchange(user, assistant, proposedTopic = topic)
         }
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-p" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-p" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
 
         vm.onDraftChange("about greedy meshing")
@@ -373,7 +399,7 @@ class ChatThreadViewModelTest {
             repo.snapshot = listOf(user)
             ChatExchange(user, null, proposedTopic = ChatTopic("evershift", "Evershift"))
         }
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-d" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-d" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
 
         vm.onDraftChange("hello")
@@ -400,7 +426,7 @@ class ChatThreadViewModelTest {
             repo.snapshot = repo.snapshot + user
             exchange
         }
-        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-c" }, { t0 })
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-c" }, { t0 })
         val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
 
         vm.onDraftChange("first")
@@ -420,7 +446,7 @@ class ChatThreadViewModelTest {
         val pending = generalThread().copy(pendingReply = true)
         repo = ColdChatRepository(snapshot = emptyList(), thread = pending)
 
-        ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-w" }, { t0 })
+        ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-w" }, { t0 })
         // init's poll collector keeps `thread` hot — no external collector needed.
 
         testScheduler.runCurrent()
@@ -444,7 +470,7 @@ class ChatThreadViewModelTest {
     fun `settled threads never poll`() = runTest {
         Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
         repo = ColdChatRepository(snapshot = emptyList(), thread = generalThread())
-        ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, "chat_1", { "req-s" }, { t0 })
+        ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-s" }, { t0 })
         testScheduler.runCurrent()
         val afterSubscribe = repo.threadFetches
 
@@ -452,6 +478,36 @@ class ChatThreadViewModelTest {
         testScheduler.runCurrent()
 
         assertEquals(afterSubscribe, repo.threadFetches) // no ticks for a settled thread
+    }
+
+    @Test
+    fun `saveNote snapshots the reply with chat provenance and never user messages`() = runTest {
+        repo = ColdChatRepository(snapshot = emptyList(), thread = generalThread())
+        val notes = ColdNoteRepository()
+        val reply = msg("a1", MessageRole.ASSISTANT, "Compare X and Y — Y wins on latency.")
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, notes, "chat_1", { "req-n" }, { t0 })
+
+        vm.saveNote(reply)
+        vm.saveNote(msg("u1", MessageRole.USER, "user text must not be saved"))
+
+        assertEquals(1, notes.createdDrafts.size) // user message ignored
+        val draft = notes.createdDrafts[0]
+        assertEquals("Compare X and Y — Y wins on latency.", draft.text)
+        assertEquals(EntityKind.CHAT, draft.sourceType)
+        assertEquals("chat_1", draft.sourceId)
+        assertTrue(vm.notice.value!!.startsWith("Note saved"))
+    }
+
+    @Test
+    fun `saveNote failure surfaces a notice without touching history`() = runTest {
+        repo = ColdChatRepository(snapshot = emptyList(), thread = generalThread())
+        val notes = ColdNoteRepository()
+        notes.createOutcome = { throw RuntimeException("server unreachable") }
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, notes, "chat_1", { "req-n" }, { t0 })
+
+        vm.saveNote(msg("a1", MessageRole.ASSISTANT, "some reply"))
+
+        assertTrue(vm.notice.value!!.startsWith("Note save failed"))
     }
 }
 
