@@ -3,6 +3,7 @@ package dev.magnor.kompakt.ui.viewmodels
 import dev.magnor.kompakt.data.repository.AgentRepository
 import dev.magnor.kompakt.data.repository.ChatRepository
 import dev.magnor.kompakt.data.repository.NoteRepository
+import dev.magnor.kompakt.data.repository.OrganizationRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.AgentBackendInfo
@@ -15,9 +16,13 @@ import dev.magnor.kompakt.domain.AgentRunKind
 import dev.magnor.kompakt.domain.AgentRunResult
 import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.AgentsSurface
+import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.EntityId
+import dev.magnor.kompakt.domain.EntityKind
+import dev.magnor.kompakt.domain.Note
 import dev.magnor.kompakt.domain.NoteDraft
+import dev.magnor.kompakt.domain.Project
 import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.TaskDraft
@@ -268,17 +273,22 @@ class AgentRunDetailViewModelTest {
         state = state, title = "Readiness check", prompt = "Reply READY", createdAt = t0, updatedAt = t0,
     )
 
-    private fun vm(repo: ColdAgentRepository): AgentRunDetailViewModel =
+    private fun vm(
+        repo: ColdAgentRepository,
+        noteRepository: NoteRepository = unusedNoteRepo,
+        organizationRepository: OrganizationRepository = unusedOrgRepo,
+    ): AgentRunDetailViewModel =
         AgentRunDetailViewModel(
             agentRepository = repo,
             taskRepository = unusedTaskRepo,
-            noteRepository = unusedNoteRepo,
+            noteRepository = noteRepository,
             chatRepository = unusedChatRepo,
+            organizationRepository = organizationRepository,
             runId = "ses_1",
             newRequestId = { "req-1" },
         )
 
-    // Transitions (create task / save note / discuss) are not under test here —
+    // Transitions (create task / discuss) are not under test here —
     // stubs throw if ever reached.
     private val unusedTaskRepo = object : TaskRepository {
         override fun observeTasks(filter: TaskFilter) = throw UnsupportedOperationException()
@@ -313,6 +323,88 @@ class AgentRunDetailViewModelTest {
             throw UnsupportedOperationException()
         override suspend fun setScope(chatId: EntityId, scopeType: String?, scopeRef: String?, requestId: RequestId) =
             throw UnsupportedOperationException()
+    }
+    private val unusedOrgRepo = object : OrganizationRepository {
+        // observeProjects() is invoked eagerly when the VM builds its
+        // saveTargets chain — throw on COLLECTION, not on call.
+        override fun observeProjects(): Flow<List<Project>> = flow { throw UnsupportedOperationException() }
+        override fun observeProject(id: EntityId) = throw UnsupportedOperationException()
+        override fun observeAreas() = throw UnsupportedOperationException()
+        override fun observeArea(id: EntityId) = throw UnsupportedOperationException()
+    }
+
+    /** T-022e: picker source — cold one-shot, mirrors the remote repo. */
+    private class TestProjectsRepository(private val projects: List<Project>) : OrganizationRepository {
+        override fun observeProjects(): Flow<List<Project>> = flow { emit(projects) }
+        override fun observeProject(id: EntityId): Flow<Project?> =
+            flow { emit(projects.firstOrNull { it.id == id }) }
+        override fun observeAreas(): Flow<List<Area>> = flow { emit(emptyList()) }
+        override fun observeArea(id: EntityId): Flow<Area?> = flow { emit(null) }
+    }
+
+    /** Captures the transition draft — saveNote is the action under test. */
+    private class RecordingNoteRepo : NoteRepository {
+        var lastDraft: NoteDraft? = null
+        override fun observeNotes(projectId: EntityId?, areaId: EntityId?) = throw UnsupportedOperationException()
+        override fun observeNote(id: EntityId) = throw UnsupportedOperationException()
+        override suspend fun getNote(id: EntityId) = throw UnsupportedOperationException()
+        override suspend fun createNote(draft: NoteDraft, requestId: RequestId): Note {
+            lastDraft = draft
+            return Note(id = "vault:note:new", title = "saved", updatedAt = Instant.parse("2026-08-25T20:00:00Z"))
+        }
+        override suspend fun updateNote(id: EntityId, text: String, expectedChecksum: String) =
+            throw UnsupportedOperationException()
+    }
+
+    // ---- T-022e: save-to-project picker + targeted saves ----
+
+    @Test
+    fun `save targets list vault projects only`() = runTest {
+        val repo = ColdAgentRepository(surface(), mutableListOf(session(AgentRunState.SUCCEEDED)))
+        val vm = vm(
+            repo,
+            organizationRepository = TestProjectsRepository(
+                listOf(
+                    Project(id = "vault:project:kodeverket", name = "KodeVerket", updatedAt = t0),
+                    Project(id = "machine:project:evershift", name = "Evershift", updatedAt = t0),
+                ),
+            ),
+        )
+        val collector = launch(UnconfinedTestDispatcher()) { vm.saveTargets.collect { } }
+
+        // machine projects have no vault folder (V-064 422s) — never offered.
+        assertEquals(listOf("vault:project:kodeverket"), vm.saveTargets.value.map { it.id })
+        collector.cancel()
+    }
+
+    @Test
+    fun `save note to a picked project targets it and names the destination`() = runTest {
+        val repo = ColdAgentRepository(surface(), mutableListOf(session(AgentRunState.SUCCEEDED)))
+        val notes = RecordingNoteRepo()
+        val vm = vm(repo, noteRepository = notes)
+        val collector = launch(UnconfinedTestDispatcher()) { vm.run.collect { } }
+
+        vm.saveNote(Project(id = "vault:project:kodeverket", name = "KodeVerket", updatedAt = t0))
+
+        assertEquals("vault:project:kodeverket", notes.lastDraft?.projectId)
+        assertEquals(EntityKind.AGENT_RUN, notes.lastDraft?.sourceType)
+        assertEquals("ses_1", notes.lastDraft?.sourceId)
+        assertEquals("Note saved to KodeVerket", vm.feedback.value)
+        collector.cancel()
+    }
+
+    @Test
+    fun `inbox save note omits the project id`() = runTest {
+        val repo = ColdAgentRepository(surface(), mutableListOf(session(AgentRunState.SUCCEEDED)))
+        val notes = RecordingNoteRepo()
+        val vm = vm(repo, noteRepository = notes)
+        val collector = launch(UnconfinedTestDispatcher()) { vm.run.collect { } }
+
+        vm.saveNote()
+
+        assertNull(notes.lastDraft?.projectId)
+        assertEquals("Note saved", vm.feedback.value)
+        collector.cancel()
     }
 
     @Test

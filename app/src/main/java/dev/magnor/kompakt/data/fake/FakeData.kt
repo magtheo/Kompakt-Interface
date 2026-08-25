@@ -59,7 +59,7 @@ object FakeData {
         Task(
             id = "task_001", title = "Review PR", status = TaskStatus.OPEN,
             dueAt = Instant.parse("2026-08-22T17:00:00Z"),
-            projectId = "project_001", updatedAt = Instant.parse("2026-08-22T14:00:00Z"),
+            projectId = "machine:project:evershift", updatedAt = Instant.parse("2026-08-22T14:00:00Z"),
         ),
         Task(
             id = "task_002", title = "Buy groceries", status = TaskStatus.OPEN,
@@ -69,7 +69,7 @@ object FakeData {
         Task(
             id = "task_003", title = "Send application", status = TaskStatus.OPEN,
             dueAt = Instant.parse("2026-08-22T20:00:00Z"),
-            projectId = "project_002", updatedAt = Instant.parse("2026-08-21T18:00:00Z"),
+            projectId = "vault:project:kodeverket", updatedAt = Instant.parse("2026-08-21T18:00:00Z"),
         ),
         Task(
             id = "task_004", title = "Dentist", status = TaskStatus.OPEN,
@@ -79,7 +79,7 @@ object FakeData {
         Task(
             id = "task_005", title = "Submit course application", status = TaskStatus.OPEN,
             dueAt = Instant.parse("2026-08-21T23:59:00Z"),
-            projectId = "project_002", updatedAt = Instant.parse("2026-08-21T10:00:00Z"),
+            projectId = "vault:project:kodeverket", updatedAt = Instant.parse("2026-08-21T10:00:00Z"),
         ),
         Task(
             id = "task_006", title = "Renew passport", status = TaskStatus.OPEN,
@@ -179,25 +179,27 @@ object FakeData {
 
     val projects = listOf(
         Project(
-            id = "project_001", name = "Evershift", status = ProjectStatus.ACTIVE,
+            // T-022e: ids mirror the real /v1/projects wire scheme so the
+            // detail join + save-target filter behave like the server.
+            id = "machine:project:evershift", name = "Evershift", status = ProjectStatus.ACTIVE,
             currentGoal = "Ship vertical slice milestone",
             nextAction = "Review PR", attentionCount = 2,
             updatedAt = Instant.parse("2026-08-22T10:00:00Z"),
         ),
         Project(
-            id = "project_002", name = "KodeVerket", status = ProjectStatus.ACTIVE,
+            id = "vault:project:kodeverket", name = "KodeVerket", status = ProjectStatus.ACTIVE,
             currentGoal = "Task-system rollout",
             nextAction = "Send application", attentionCount = 1,
             updatedAt = Instant.parse("2026-08-21T09:00:00Z"),
         ),
         Project(
-            id = "project_003", name = "Kompakt-Interface", status = ProjectStatus.ACTIVE,
+            id = "machine:project:kompakt-interface", name = "Kompakt-Interface", status = ProjectStatus.ACTIVE,
             currentGoal = "v0.1 on real hardware",
             nextAction = "Finish Phase 2 domain model", attentionCount = 0,
             updatedAt = NOW,
         ),
         Project(
-            id = "project_004", name = "dev-server", status = ProjectStatus.ACTIVE,
+            id = "machine:project:dev-server", name = "dev-server", status = ProjectStatus.ACTIVE,
             currentGoal = "Keep the control plane boring",
             attentionCount = 0,
             updatedAt = Instant.parse("2026-08-20T11:00:00Z"),
@@ -230,6 +232,7 @@ object FakeData {
         Note(
             id = "note_003",
             text = "KodeVerket pricing — value-based tiers beat hourly for retained clients.",
+            projectId = "vault:project:kodeverket", // T-022e: demo project-note join
             createdAt = threeDaysAgo, updatedAt = threeDaysAgo,
         ),
     )
@@ -294,6 +297,15 @@ object FakeData {
             createdAt = Instant.parse("2026-08-10T09:00:00Z"),
             updatedAt = Instant.parse("2026-08-16T11:00:00Z"),
             lastMessagePreview = "Japan in autumn?",
+        ),
+        ChatThread(
+            // T-022e: workspace-scoped demo — Evershift project detail joins it
+            // via machine:project:evershift → ref "evershift".
+            id = "thread_006", title = "Evershift build",
+            createdAt = Instant.parse("2026-08-23T09:00:00Z"),
+            updatedAt = Instant.parse("2026-08-23T10:00:00Z"),
+            lastMessagePreview = "Chunk meshing tweak, committed",
+            scopeType = "workspace", scopeRef = "evershift", scopeLabel = "Evershift",
         ),
     )
 

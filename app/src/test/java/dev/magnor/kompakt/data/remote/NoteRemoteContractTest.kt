@@ -3,6 +3,7 @@ package dev.magnor.kompakt.data.remote
 import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.domain.Note
 import dev.magnor.kompakt.domain.NoteConflictException
+import dev.magnor.kompakt.domain.NoteDraft
 import dev.magnor.kompakt.domain.RepositoryException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -10,6 +11,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -129,5 +131,39 @@ class NoteRemoteContractTest {
         assertTrue(thrown is RepositoryException)
         assertNull(thrown as? NoteConflictException)
         assertEquals("session busy", thrown?.message)
+    }
+
+    // ---- T-022e / V-064: project-targeted note creation ----
+
+    private val createdEnvelope = """
+        {"note":{"id":"vault:note:new","title":"Idea","role":"note","category":"Projects",
+          "project_id":"vault:project:kodeverket","updated_at":"2026-08-25T12:00:00Z"}}
+    """.trimIndent()
+
+    @Test
+    fun `create carries the project id for targeted saves`() = runTest {
+        enqueueJson(createdEnvelope)
+        repo.createNote(
+            NoteDraft(text = "## Idea\nbody", projectId = "vault:project:kodeverket"),
+            "req-1",
+        )
+
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/v1/notes", request.path)
+        assertEquals("req-1", request.getHeader("X-Request-Id"))
+        assertTrue(request.body.readUtf8().contains("\"project_id\":\"vault:project:kodeverket\""))
+    }
+
+    @Test
+    fun `create omits the project id for inbox saves`() = runTest {
+        enqueueJson(createdEnvelope)
+        repo.createNote(NoteDraft(text = "## Idea\nbody"), "req-2")
+
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/v1/notes", request.path)
+        // explicitNulls=false: an inbox save must not carry a null project_id
+        assertFalse(request.body.readUtf8().contains("project_id"))
     }
 }

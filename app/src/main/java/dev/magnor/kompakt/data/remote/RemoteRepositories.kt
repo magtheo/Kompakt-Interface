@@ -127,6 +127,8 @@ class RemoteNoteRepository(private val api: HttpApi) : NoteRepository {
         @SerialName("request_id") val requestId: RequestId,
         val title: String? = null,
         val text: String,
+        // T-022e: vault project target (V-064). Null → inbox (old behavior).
+        @SerialName("project_id") val projectId: String? = null,
         @SerialName("source_type") val sourceType: String? = null,
         @SerialName("source_id") val sourceId: String? = null,
     )
@@ -160,6 +162,7 @@ class RemoteNoteRepository(private val api: HttpApi) : NoteRepository {
             requestId = requestId,
             title = firstLine,
             text = draft.text,
+            projectId = draft.projectId,
             sourceType = draft.sourceType?.wire,
             sourceId = draft.sourceId,
         )

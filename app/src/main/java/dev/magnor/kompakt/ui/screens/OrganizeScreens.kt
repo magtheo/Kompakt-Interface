@@ -14,6 +14,7 @@ import dev.magnor.kompakt.ui.viewmodels.AreasViewModel
 import dev.magnor.kompakt.ui.viewmodels.InboxViewModel
 import dev.magnor.kompakt.ui.viewmodels.ItemDetailViewModel
 import dev.magnor.kompakt.ui.viewmodels.NotesViewModel
+import dev.magnor.kompakt.ui.viewmodels.ProjectDetailViewModel
 import dev.magnor.kompakt.ui.viewmodels.ProjectsViewModel
 import dev.magnor.kompakt.ui.viewmodels.TasksViewModel
 
@@ -60,11 +61,11 @@ private fun projectGlyph(status: ProjectStatus): String = when (status) {
     ProjectStatus.UNKNOWN -> "?"
 }
 
-/** Projects — read-only PARA projection (v0.1, D004). Rows drill into tasks. */
+/** Projects — read-only PARA projection (v0.1, D004). Rows open detail (T-022e). */
 @Composable
 fun ProjectsScreen(
     onBack: () -> Unit,
-    onOpenProjectTasks: (EntityId) -> Unit = {},
+    onOpenProject: (EntityId) -> Unit = {},
     viewModel: ProjectsViewModel = containerViewModel {
         ProjectsViewModel(it.organizationRepository, it.taskRepository)
     },
@@ -87,8 +88,78 @@ fun ProjectsScreen(
                     subtitle = listOfNotNull(row.project.currentGoal ?: row.project.nextAction, count)
                         .joinToString(" · "),
                     trailing = projectGlyph(row.project.status),
-                    onClick = { onOpenProjectTasks(row.project.id) },
+                    onClick = { onOpenProject(row.project.id) },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Project detail — the project's context (T-022e): workspace chats that bind
+ * this project's repo + project notes; tasks one tap deeper (existing filter).
+ */
+@Composable
+fun ProjectDetailScreen(
+    projectId: EntityId,
+    onBack: () -> Unit,
+    onOpenChat: (EntityId) -> Unit,
+    onOpenNote: (EntityId) -> Unit,
+    onOpenTasks: () -> Unit,
+    viewModel: ProjectDetailViewModel = containerViewModel(key = "project-$projectId") {
+        ProjectDetailViewModel(
+            organizationRepository = it.organizationRepository,
+            noteRepository = it.noteRepository,
+            chatRepository = it.chatRepository,
+            projectId = projectId,
+        )
+    },
+) {
+    val state by viewModel.state.collectAsState()
+    val project = state.project
+
+    AppScreen(title = project?.name ?: "Project", onBack = onBack) {
+        when {
+            state.error != null -> ListRow(title = state.error ?: "Could not load")
+            !state.loaded -> ListRow(title = "Loading…")
+            project == null -> ListRow(title = "Project not found")
+            else -> {
+                ListRow(
+                    title = "Tasks",
+                    subtitle = listOfNotNull(
+                        project.currentGoal ?: project.nextAction,
+                    ).joinToString(" · ").ifEmpty { "Project-filtered task list" },
+                    trailing = projectGlyph(project.status),
+                    onClick = onOpenTasks,
+                )
+
+                state.chats.forEach { thread ->
+                    ListRow(
+                        title = thread.title,
+                        subtitle = "Workspace chat",
+                        onClick = { onOpenChat(thread.id) },
+                    )
+                }
+                if (state.chats.isEmpty()) {
+                    ListRow(title = "No workspace chats for this project")
+                }
+
+                state.notes.forEach { note ->
+                    ListRow(
+                        title = note.title ?: "Untitled",
+                        subtitle = note.preview,
+                        onClick = { onOpenNote(note.id) },
+                    )
+                }
+                if (state.notes.isEmpty()) {
+                    ListRow(
+                        title = if (project.id.startsWith("machine:project:")) {
+                            "Notes live in the vault — machine projects have none"
+                        } else {
+                            "No notes yet"
+                        },
+                    )
+                }
             }
         }
     }
