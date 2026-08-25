@@ -27,6 +27,19 @@ data class ChatThread(
     val isTemporary: Boolean = false,
     @SerialName("last_message_preview")
     val lastMessagePreview: String? = null,
+    // T-022d: conversation scope — topic (vault bucket seed) or workspace
+    // (git checkout, OpenCode session). Null = general chat. Defaults keep
+    // old-server payloads decoding (explicitNulls=false → absent = null).
+    @SerialName("scope_type")
+    val scopeType: String? = null,
+    @SerialName("scope_ref")
+    val scopeRef: String? = null,
+    /** Server-computed display label for the current scope (e.g. "Evershift"). */
+    @SerialName("scope_label")
+    val scopeLabel: String? = null,
+    /** Workspace tier: a turn is still running; messages GET triggers catch-up. */
+    @SerialName("pending_reply")
+    val pendingReply: Boolean = false,
 ) : SyncEntity
 
 /** Closed vocabulary, but still forward-compat: unknown wire → UNKNOWN (§9). */
@@ -77,14 +90,37 @@ data class ChatThreadDraft(
     val projectId: EntityId? = null,
     @SerialName("is_temporary")
     val isTemporary: Boolean = false,
+    // T-022d: optional scope at creation — the picker's selection.
+    @SerialName("scope_type")
+    val scopeType: String? = null,
+    @SerialName("scope_ref")
+    val scopeRef: String? = null,
+)
+
+/**
+ * T-022d: a chat topic — the notes sorter's bucket registry, one source of
+ * truth (anti-bloat). Reference data like [Workspace]: no id namespace, no
+ * revisions, no sync. Labels the topic picker and the propose chip.
+ */
+@Serializable
+data class ChatTopic(
+    val id: String,
+    val label: String,
 )
 
 /**
  * Result of one send: the acknowledged user message plus the generated
  * assistant reply (null when the backend produced none — LLM failure
  * degrades server-side to an honest note, so null only on odd wire).
+ *
+ * T-022d: an unscoped thread may carry [proposedTopic] — a suggestion,
+ * NEVER auto-applied; Apply is an explicit POST /scope. A workspace-scoped
+ * thread carries [workspaceState] (settled|pending|busy|error|unavailable)
+ * for inline feedback; pending turns surface via thread.pendingReply.
  */
 data class ChatExchange(
     val user: Message,
     val assistant: Message?,
+    val proposedTopic: ChatTopic? = null,
+    val workspaceState: String? = null,
 )

@@ -9,6 +9,7 @@ import dev.magnor.kompakt.data.repository.OrganizationRepository
 import dev.magnor.kompakt.data.repository.SyncRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
+import dev.magnor.kompakt.data.repository.TopicRepository
 import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.AgentCommand
 import dev.magnor.kompakt.domain.AgentDispatchDraft
@@ -23,6 +24,7 @@ import dev.magnor.kompakt.domain.ChangePage
 import dev.magnor.kompakt.domain.ChatExchange
 import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
+import dev.magnor.kompakt.domain.ChatTopic
 import dev.magnor.kompakt.domain.CaptureProposal
 import dev.magnor.kompakt.domain.CaptureResult
 import dev.magnor.kompakt.domain.EntityId
@@ -226,8 +228,14 @@ class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
             val title: String,
             @SerialName("project_id") val projectId: EntityId? = null,
             @SerialName("is_temporary") val isTemporary: Boolean = false,
+            // T-022d: both null = general chat (fields omitted — encodeDefaults=false).
+            @SerialName("scope_type") val scopeType: String? = null,
+            @SerialName("scope_ref") val scopeRef: String? = null,
         )
-        val body = CreateBody(requestId, draft.title, draft.projectId, draft.isTemporary)
+        val body = CreateBody(
+            requestId, draft.title, draft.projectId, draft.isTemporary,
+            draft.scopeType, draft.scopeRef,
+        )
         return api.post(
             "/v1/chats",
             KompaktJson.encodeToString(body),
@@ -249,7 +257,12 @@ class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
             requestId,
             timeoutSeconds = 120,
         ).let { KompaktJson.decodeFromString<SendEnvelope>(it) }
-        return ChatExchange(user = envelope.message, assistant = envelope.assistantMessage)
+        return ChatExchange(
+            user = envelope.message,
+            assistant = envelope.assistantMessage,
+            proposedTopic = envelope.proposedTopic,
+            workspaceState = envelope.workspace?.state,
+        )
     }
 
     override suspend fun truncate(chatId: EntityId, keepThrough: EntityId?, requestId: RequestId) {
@@ -266,6 +279,25 @@ class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
         )
     }
 
+    override suspend fun setScope(
+        chatId: EntityId,
+        scopeType: String?,
+        scopeRef: String?,
+        requestId: RequestId,
+    ): ChatThread {
+        @Serializable
+        data class ScopeBody(
+            @SerialName("request_id") val requestId: RequestId,
+            @SerialName("scope_type") val scopeType: String? = null,
+            @SerialName("scope_ref") val scopeRef: String? = null,
+        )
+        return api.post(
+            "/v1/chats/$chatId/scope",
+            KompaktJson.encodeToString(ScopeBody(requestId, scopeType, scopeRef)),
+            requestId,
+        ).let { KompaktJson.decodeFromString<ChatEnvelope>(it).chat }
+    }
+
     @Serializable
     private data class ChatEnvelope(val chat: ChatThread)
 
@@ -273,7 +305,14 @@ class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
     private data class SendEnvelope(
         val message: Message,
         @SerialName("assistant_message") val assistantMessage: Message? = null,
+        // T-022d: proposal for the chip — unscoped threads only, never applied server-side.
+        @SerialName("proposed_topic") val proposedTopic: ChatTopic? = null,
+        // Workspace tier outcome; execution_id/committed stay undecoded (UI needs neither).
+        val workspace: WorkspaceOutcomeWire? = null,
     )
+
+    @Serializable
+    private data class WorkspaceOutcomeWire(val state: String)
 }
 
 class RemoteAgentRepository(private val api: HttpApi) : AgentRepository {
@@ -450,5 +489,12 @@ class RemoteCaptureRepository(private val api: HttpApi) : CaptureRepository {
 class RemoteWorkspaceRepository(private val api: HttpApi) : WorkspaceRepository {
     override fun observeWorkspaces(): Flow<List<Workspace>> = flow {
         emit(api.decodeList("/v1/workspaces", "workspaces"))
+    }
+}
+
+/** T-022d: topic registry read — the notes sorter's buckets, {id, label} only. */
+class RemoteTopicRepository(private val api: HttpApi) : TopicRepository {
+    override fun observeTopics(): Flow<List<ChatTopic>> = flow {
+        emit(api.decodeList("/v1/chat/topics", "topics"))
     }
 }

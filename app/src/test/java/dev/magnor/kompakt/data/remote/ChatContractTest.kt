@@ -143,4 +143,156 @@ class ChatContractTest {
         assertEquals("chatmsg:u2", exchange.user.id)
         assertNull(exchange.assistant)
     }
+
+    // ── T-022d chat scopes (V-062/V-063) ────────────────────────────────
+
+    @Test
+    fun `topic registry decodes topics envelope`() = runTest {
+        enqueueJson(
+            """
+            {"topics":[{"id":"evershift","label":"Evershift"},
+                       {"id":"kodeverket","label":"KodeVerket"}]}
+            """.trimIndent(),
+        )
+        val repo = RemoteTopicRepository(api)
+        val topics = repo.observeTopics().first()
+        assertEquals(2, topics.size)
+        assertEquals("evershift", topics[0].id)
+        assertEquals("KodeVerket", topics[1].label)
+        assertEquals("/v1/chat/topics", server.takeRequest().path)
+    }
+
+    @Test
+    fun `create with scope posts scope fields, general create omits them`() = runTest {
+        enqueueJson(
+            """
+            {"chat":{"id":"chat_3","title":"New chat","created_at":"2026-08-23T12:00:00Z",
+             "updated_at":"2026-08-23T12:00:00Z","revision":1,"project_id":null,
+             "is_temporary":false,"last_message_preview":null,
+             "scope_type":"topic","scope_ref":"evershift","scope_label":"Evershift"}}
+            """.trimIndent(),
+        )
+        val repo = RemoteChatRepository(api)
+        val thread = repo.createThread(
+            dev.magnor.kompakt.domain.ChatThreadDraft(
+                title = "New chat",
+                scopeType = "topic",
+                scopeRef = "evershift",
+            ),
+            requestId = "req-create-2",
+        )
+        assertEquals("topic", thread.scopeType)
+        assertEquals("evershift", thread.scopeRef)
+        assertEquals("Evershift", thread.scopeLabel)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("\"scope_type\":\"topic\""))
+        assertTrue(body.contains("\"scope_ref\":\"evershift\""))
+
+        // General chat: scope fields must be ABSENT (explicitNulls=false).
+        enqueueJson(
+            """
+            {"chat":{"id":"chat_4","title":"New chat","created_at":"2026-08-23T12:00:00Z",
+             "updated_at":"2026-08-23T12:00:00Z","revision":1,"project_id":null,
+             "is_temporary":false,"last_message_preview":null}}
+            """.trimIndent(),
+        )
+        repo.createThread(dev.magnor.kompakt.domain.ChatThreadDraft(title = "New chat"), "req-create-3")
+        val generalBody = server.takeRequest().body.readUtf8()
+        assertTrue(!generalBody.contains("scope_type"))
+        assertTrue(!generalBody.contains("scope_ref"))
+    }
+
+    @Test
+    fun `setScope posts scope pair and decodes re-scoped thread`() = runTest {
+        enqueueJson(
+            """
+            {"chat":{"id":"chat_1","title":"New chat","created_at":"2026-08-23T12:00:00Z",
+             "updated_at":"2026-08-23T12:01:00Z","revision":2,"project_id":null,
+             "is_temporary":false,"last_message_preview":null,
+             "scope_type":"topic","scope_ref":"evershift","scope_label":"Evershift"}}
+            """.trimIndent(),
+        )
+        val repo = RemoteChatRepository(api)
+        val thread = repo.setScope("chat_1", "topic", "evershift", "req-scope-1")
+        assertEquals("evershift", thread.scopeRef)
+        assertEquals(2, thread.revision)
+        val req = server.takeRequest()
+        assertEquals("/v1/chats/chat_1/scope", req.path)
+        assertEquals("req-scope-1", req.getHeader("X-Request-Id"))
+        val body = req.body.readUtf8()
+        assertTrue(body.contains("\"scope_type\":\"topic\""))
+        assertTrue(body.contains("\"scope_ref\":\"evershift\""))
+    }
+
+    @Test
+    fun `setScope with nulls clears the scope and omits the fields`() = runTest {
+        enqueueJson(
+            """
+            {"chat":{"id":"chat_1","title":"New chat","created_at":"2026-08-23T12:00:00Z",
+             "updated_at":"2026-08-23T12:02:00Z","revision":3,"project_id":null,
+             "is_temporary":false,"last_message_preview":null}}
+            """.trimIndent(),
+        )
+        val repo = RemoteChatRepository(api)
+        val thread = repo.setScope("chat_1", null, null, "req-scope-2")
+        assertNull(thread.scopeType)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(!body.contains("scope_type"))
+    }
+
+    @Test
+    fun `send decodes proposed_topic on an unscoped thread`() = runTest {
+        enqueueJson(
+            """
+            {"message":{"id":"chatmsg:u3","chat_id":"chat_1","role":"user","content":"greedy meshing?",
+             "created_at":"2026-08-23T12:00:00Z","updated_at":"2026-08-23T12:00:00Z",
+             "revision":1,"status":"sent"},
+             "assistant_message":{"id":"chatmsg:a3","chat_id":"chat_1","role":"assistant","content":"…",
+             "created_at":"2026-08-23T12:00:06Z","updated_at":"2026-08-23T12:00:06Z",
+             "revision":1,"status":"sent"},
+             "proposed_topic":{"id":"evershift","label":"Evershift"}}
+            """.trimIndent(),
+        )
+        val repo = RemoteChatRepository(api)
+        val exchange = repo.sendMessage("chat_1", "greedy meshing?", "req-send-3")
+        assertEquals("evershift", exchange.proposedTopic?.id)
+        assertEquals("Evershift", exchange.proposedTopic?.label)
+    }
+
+    @Test
+    fun `send decodes workspace outcome state`() = runTest {
+        enqueueJson(
+            """
+            {"message":{"id":"chatmsg:u4","chat_id":"chat_1","role":"user","content":"add a readme",
+             "created_at":"2026-08-23T12:00:00Z","updated_at":"2026-08-23T12:00:00Z",
+             "revision":1,"status":"sent"},
+             "assistant_message":{"id":"chatmsg:a4","chat_id":"chat_1","role":"assistant","content":"done",
+             "created_at":"2026-08-23T12:00:11Z","updated_at":"2026-08-23T12:00:11Z",
+             "revision":1,"status":"sent"},
+             "workspace":{"state":"settled","execution_id":"exec_7","committed":true}}
+            """.trimIndent(),
+        )
+        val repo = RemoteChatRepository(api)
+        val exchange = repo.sendMessage("chat_1", "add a readme", "req-send-4")
+        assertEquals("settled", exchange.workspaceState)
+    }
+
+    @Test
+    fun `thread wire decodes scope fields and pending_reply`() = runTest {
+        enqueueJson(
+            """
+            {"chats":[{"id":"chat_5","title":"New chat","created_at":"2026-08-23T12:00:00Z",
+             "updated_at":"2026-08-23T12:05:00Z","revision":4,"project_id":null,
+             "is_temporary":false,"last_message_preview":"add a readme",
+             "scope_type":"workspace","scope_ref":"roblox-toolkit","scope_label":"Roblox Toolkit",
+             "pending_reply":true}]}
+            """.trimIndent(),
+        )
+        val repo = RemoteChatRepository(api)
+        val threads = repo.observeThreads().first()
+        assertEquals("workspace", threads[0].scopeType)
+        assertEquals("roblox-toolkit", threads[0].scopeRef)
+        assertEquals("Roblox Toolkit", threads[0].scopeLabel)
+        assertTrue(threads[0].pendingReply)
+    }
 }

@@ -53,12 +53,15 @@ import kotlinx.coroutines.launch
 fun ChatListScreen(
     onOpenThread: (EntityId) -> Unit,
     viewModel: ChatListViewModel = containerViewModel {
-        ChatListViewModel(it.chatRepository, it::nextRequestId, it.now())
+        ChatListViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it::nextRequestId, it.now())
     },
 ) {
     val threads by viewModel.threads.collectAsState()
     val created by viewModel.created.collectAsState()
     val error by viewModel.error.collectAsState()
+    val topics by viewModel.topics.collectAsState()
+    val workspaces by viewModel.workspaces.collectAsState()
+    var newChatExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(created) {
         created?.let { id ->
@@ -68,7 +71,39 @@ fun ChatListScreen(
     }
 
     AppScreen(title = "Chats") {
-        ListRow(title = "New chat", subtitle = "Start a conversation", onClick = viewModel::newChat)
+        // T-022d: chat scope picker — General (no context), vault topics, or
+        // workspaces (OpenCode sessions). Choice at creation only; the
+        // thread header can re-scope later.
+        ListRow(
+            title = "New chat",
+            subtitle = if (newChatExpanded) null else "Start a conversation",
+            trailing = if (newChatExpanded) "▾" else "▸",
+            onClick = { newChatExpanded = !newChatExpanded },
+        )
+        if (newChatExpanded) {
+            ListRow(title = "General", subtitle = "No topic context") {
+                newChatExpanded = false
+                viewModel.newChat()
+            }
+            if (topics.isNotEmpty()) {
+                SectionLabel("Topics")
+                topics.forEach { topic ->
+                    ListRow(title = topic.label) {
+                        newChatExpanded = false
+                        viewModel.newChat("topic", topic.id)
+                    }
+                }
+            }
+            if (workspaces.isNotEmpty()) {
+                SectionLabel("Workspaces")
+                workspaces.forEach { workspace ->
+                    ListRow(title = workspace.label, subtitle = workspace.ref) {
+                        newChatExpanded = false
+                        viewModel.newChat("workspace", workspace.ref)
+                    }
+                }
+            }
+        }
         error?.let { ListRow(title = it, trailing = "!") }
         if (threads.isEmpty()) {
             ListRow(title = "No chats yet", subtitle = "Tap New chat above")
@@ -76,7 +111,8 @@ fun ChatListScreen(
             threads.forEach { thread ->
                 ListRow(
                     title = thread.title,
-                    subtitle = thread.lastMessagePreview,
+                    subtitle = listOfNotNull(thread.scopeLabel, thread.lastMessagePreview)
+                        .joinToString(" · "),
                     trailing = thread.updatedAt.relativeTo(viewModel.now),
                     onClick = { onOpenThread(thread.id) },
                 )
@@ -98,7 +134,7 @@ fun ChatThreadScreen(
     threadId: EntityId,
     onBack: () -> Unit,
     viewModel: ChatThreadViewModel = containerViewModel(key = "chat-$threadId") {
-        ChatThreadViewModel(it.chatRepository, threadId, it::nextRequestId, it.clock)
+        ChatThreadViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, threadId, it::nextRequestId, it.clock)
     },
 ) {
     val thread by viewModel.thread.collectAsState()
@@ -107,6 +143,10 @@ fun ChatThreadScreen(
     val draft by viewModel.draft.collectAsState()
     val composerMode by viewModel.composerMode.collectAsState()
     val notice by viewModel.notice.collectAsState()
+    val proposedTopic by viewModel.proposedTopic.collectAsState()
+    val topics by viewModel.topics.collectAsState()
+    val workspaces by viewModel.workspaces.collectAsState()
+    var scopeExpanded by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -128,6 +168,76 @@ fun ChatThreadScreen(
         onBack = onBack,
         listState = listState,
         header = {
+            // T-022d: scope row — shows the thread's context (general/topic/
+            // workspace); expands to re-scope. The propose chip only ever
+            // appears on unscoped threads and applies on explicit Move.
+            ListRow(
+                title = "Scope: ${thread?.scopeLabel ?: "General"}",
+                subtitle = when (thread?.scopeType) {
+                    null -> "Tap to add topic or workspace context"
+                    "topic" -> "Topic"
+                    "workspace" -> "Workspace · auto-commits each turn"
+                    else -> thread?.scopeType
+                },
+                trailing = if (scopeExpanded) "▾" else "▸",
+                onClick = { scopeExpanded = !scopeExpanded },
+            )
+            if (scopeExpanded) {
+                ListRow(title = "General", subtitle = "No topic context") {
+                    scopeExpanded = false
+                    viewModel.setScope(null, null)
+                }
+                if (topics.isNotEmpty()) {
+                    SectionLabel("Topics")
+                    topics.forEach { topic ->
+                        ListRow(
+                            title = topic.label,
+                            trailing = if (thread?.scopeType == "topic" && thread?.scopeRef == topic.id) "●" else null,
+                        ) {
+                            scopeExpanded = false
+                            viewModel.setScope("topic", topic.id)
+                        }
+                    }
+                }
+                if (workspaces.isNotEmpty()) {
+                    SectionLabel("Workspaces")
+                    workspaces.forEach { workspace ->
+                        ListRow(
+                            title = workspace.label,
+                            subtitle = workspace.ref,
+                            trailing = if (thread?.scopeType == "workspace" && thread?.scopeRef == workspace.ref) "●" else null,
+                        ) {
+                            scopeExpanded = false
+                            viewModel.setScope("workspace", workspace.ref)
+                        }
+                    }
+                }
+            }
+            if (thread?.pendingReply == true) {
+                ListRow(
+                    title = "Workspace turn still running",
+                    subtitle = "Checking every 15 s — reply lands here",
+                    trailing = "…",
+                )
+            }
+            proposedTopic?.let { topic ->
+                Column {
+                    ListRow(
+                        title = "Topic match: ${topic.label}",
+                        subtitle = "Move this chat into the topic?",
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ButtonMMD(
+                            onClick = viewModel::applyProposal,
+                            modifier = Modifier.weight(1f),
+                        ) { TextMMD("Move") }
+                        ButtonMMD(
+                            onClick = viewModel::dismissProposal,
+                            modifier = Modifier.weight(1f),
+                        ) { TextMMD("Not now") }
+                    }
+                }
+            }
             if (notice != null) {
                 ListRow(
                     title = notice!!,
