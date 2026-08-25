@@ -6,6 +6,7 @@ import dev.magnor.kompakt.data.repository.AgentRepository
 import dev.magnor.kompakt.data.repository.ChatRepository
 import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
+import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.AgentBackendInfo
 import dev.magnor.kompakt.domain.AgentCommand
 import dev.magnor.kompakt.domain.AgentDispatchDraft
@@ -21,6 +22,7 @@ import dev.magnor.kompakt.domain.NoteDraft
 import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.TaskDraft
+import dev.magnor.kompakt.domain.Workspace
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -67,12 +69,20 @@ class AgentsListViewModel(
 @OptIn(ExperimentalCoroutinesApi::class)
 class AgentDetailViewModel(
     private val agentRepository: AgentRepository,
+    workspaceRepository: WorkspaceRepository,
     backend: String,
     agentName: String,
     private val newRequestId: () -> RequestId,
 ) : ViewModel() {
 
     private val refreshTick = MutableStateFlow(0)
+
+    /**
+     * T-022c: git checkouts dispatch can target. Feeds the workspace
+     * picker; only rendered for backends advertising workspace_selection.
+     */
+    val workspaces: StateFlow<List<Workspace>> = workspaceRepository.observeWorkspaces()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val role: StateFlow<AgentRole?> = agentRepository.observeSurface()
         .map { surface -> surface.agents.firstOrNull { it.backend == backend && it.name == agentName } }

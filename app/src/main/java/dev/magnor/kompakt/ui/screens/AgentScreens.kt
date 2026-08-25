@@ -64,6 +64,7 @@ private fun capSummary(info: AgentBackendInfo): String = listOfNotNull(
     "commands".takeIf { info.commands },
     "events".takeIf { info.eventStream },
     "projects".takeIf { info.projectRegistration },
+    "workspaces".takeIf { info.workspaceSelection },
 ).joinToString(" · ").ifEmpty { "no capabilities advertised" }
 
 private fun yn(flag: Boolean): String = if (flag) "yes" else "no"
@@ -160,7 +161,7 @@ fun AgentDetailScreen(
     onOpenRun: (runId: String) -> Unit,
     onBack: () -> Unit,
     viewModel: AgentDetailViewModel = containerViewModel(key = "agent-$backend-$agentName") {
-        AgentDetailViewModel(it.agentRepository, backend, agentName, it::nextRequestId)
+        AgentDetailViewModel(it.agentRepository, it.workspaceRepository, backend, agentName, it::nextRequestId)
     },
 ) {
     val role by viewModel.role.collectAsState()
@@ -168,10 +169,16 @@ fun AgentDetailScreen(
     val runs by viewModel.runs.collectAsState()
     val feedback by viewModel.feedback.collectAsState()
     val dispatched by viewModel.lastDispatched.collectAsState()
+    val workspaces by viewModel.workspaces.collectAsState()
 
     var prompt by remember { mutableStateOf("") }
     var projectRef by remember { mutableStateOf("") }
+    var workspaceRef by remember { mutableStateOf<String?>(null) }
+    var pickerOpen by remember { mutableStateOf(false) }
     val needsProject = info?.projectRegistration == true
+    // T-022c: backends that advertise workspace_selection get a picker of
+    // server-known git checkouts instead of free-text (refs stay opaque, D023).
+    val supportsWorkspaces = info?.workspaceSelection == true
 
     AppScreen(title = agentName.ifBlank { "Agent" }, onBack = onBack) {
         role?.let { r: AgentRole ->
@@ -191,6 +198,7 @@ fun AgentDetailScreen(
             DetailRow(label = "Commands", value = yn(caps.commands))
             DetailRow(label = "Event stream", value = yn(caps.eventStream))
             DetailRow(label = "Project registration", value = yn(caps.projectRegistration))
+            DetailRow(label = "Workspace selection", value = yn(caps.workspaceSelection))
         }
 
         SectionLabel("New run")
@@ -208,6 +216,37 @@ fun AgentDetailScreen(
             trailingIcon = { MicButton(voice) },
         )
         VoiceStatusText(voice)
+        if (supportsWorkspaces) {
+            // T-022c picker: collapsed row → expanded list, ListRow primitives
+            // only (e-ink friendly, no new material deps). Optional by design —
+            // "none" dispatches without a workspace ref.
+            val selected = workspaces.firstOrNull { it.ref == workspaceRef }
+            ListRow(
+                title = "Workspace: ${selected?.label ?: "none"}",
+                subtitle = "Git checkout the run starts in",
+                trailing = if (pickerOpen) "▾" else "▸",
+                onClick = { pickerOpen = !pickerOpen },
+            )
+            if (pickerOpen) {
+                ListRow(
+                    title = "None",
+                    subtitle = "No workspace — backend default",
+                    trailing = if (workspaceRef == null) "●" else null,
+                    onClick = { workspaceRef = null; pickerOpen = false },
+                )
+                workspaces.forEach { ws ->
+                    ListRow(
+                        title = ws.label,
+                        subtitle = ws.ref,
+                        trailing = if (ws.ref == workspaceRef) "●" else null,
+                        onClick = { workspaceRef = ws.ref; pickerOpen = false },
+                    )
+                }
+                if (workspaces.isEmpty()) {
+                    ListRow(title = "No workspaces discovered")
+                }
+            }
+        }
         if (needsProject) {
             OutlinedTextField(
                 value = projectRef,
@@ -221,7 +260,7 @@ fun AgentDetailScreen(
         }
         ButtonMMD(
             onClick = {
-                viewModel.dispatch(prompt, projectRef.takeIf { needsProject })
+                viewModel.dispatch(prompt, workspaceRef ?: projectRef.takeIf { needsProject })
                 prompt = ""
             },
             modifier = Modifier

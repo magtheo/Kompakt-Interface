@@ -18,7 +18,7 @@ import kotlinx.serialization.UseSerializers
 @Serializable
 data class AgentBackendInfo(
     /** Not on the wire — /v1/agents keys backends by name (live-verified
-     *  T-011: values carry only the six capability booleans). Kept for
+     *  T-011: values carry only the capability booleans). Kept for
      *  fake parity; defaults empty. */
     val name: String = "",
     val sandboxed: Boolean = false,
@@ -27,6 +27,9 @@ data class AgentBackendInfo(
     val commands: Boolean = false,
     @SerialName("event_stream") val eventStream: Boolean = false,
     @SerialName("project_registration") val projectRegistration: Boolean = false,
+    /** T-022c: dispatch accepts a workspace (repo) ref — coordinator
+     *  resolves it server-side. Old servers omit it → false. */
+    @SerialName("workspace_selection") val workspaceSelection: Boolean = false,
 )
 
 /**

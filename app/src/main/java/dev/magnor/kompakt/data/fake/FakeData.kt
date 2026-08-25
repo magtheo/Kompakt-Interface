@@ -22,6 +22,7 @@ import dev.magnor.kompakt.domain.Project
 import dev.magnor.kompakt.domain.ProjectStatus
 import dev.magnor.kompakt.domain.Task
 import dev.magnor.kompakt.domain.TaskStatus
+import dev.magnor.kompakt.domain.Workspace
 import kotlinx.datetime.Instant
 
 /**
@@ -105,6 +106,14 @@ object FakeData {
         ),
     )
 
+    /** GET /v1/workspaces demo payload (T-022c): git checkouts dispatch can target. */
+    val workspaces = listOf(
+        Workspace(ref = "evershift", label = "Evershift"),
+        Workspace(ref = "kompakt-interface", label = "Kompakt-Interface"),
+        Workspace(ref = "vault-coordinator", label = "Vault Coordinator"),
+        Workspace(ref = "dev-server", label = "Dev Server"),
+    )
+
     /** GET /v1/agents demo payload: backends + roles + default. */
     val agentSurface = AgentsSurface(
         backends = mapOf(
@@ -117,6 +126,7 @@ object FakeData {
                 name = "opencode", sandboxed = false, resumable = true,
                 liveSteering = true, commands = true, eventStream = true,
                 projectRegistration = false,
+                workspaceSelection = true, // T-022c picker demo
             ),
         ),
         agents = agentRoles,
