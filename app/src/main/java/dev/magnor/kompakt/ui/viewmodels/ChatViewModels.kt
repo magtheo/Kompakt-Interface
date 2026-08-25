@@ -3,14 +3,19 @@ package dev.magnor.kompakt.ui.viewmodels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.magnor.kompakt.data.repository.ChatRepository
+import dev.magnor.kompakt.data.repository.TopicRepository
+import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
+import dev.magnor.kompakt.domain.ChatTopic
 import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
 import dev.magnor.kompakt.domain.RequestId
+import dev.magnor.kompakt.domain.Workspace
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +26,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 
+/** V-063: workspace pending-reply poll cadence (15 s — e-ink/battery friendly). */
+private const val PENDING_POLL_MS = 15_000L
+
 /**
  * Chat list — conversation contexts, intentionally separate from agents (D003).
  * Remote observe flows are one-shot fetches, so the list is simply re-collected
@@ -28,10 +36,19 @@ import kotlinx.datetime.Instant
  */
 class ChatListViewModel(
     private val chatRepository: ChatRepository,
+    private val topicRepository: TopicRepository,
+    private val workspaceRepository: WorkspaceRepository,
     private val newRequestId: () -> RequestId,
     val now: Instant,
 ) : ViewModel() {
     val threads: StateFlow<List<ChatThread>> = chatRepository.observeThreads()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** T-022d: reference data for the new-chat scope picker. */
+    val topics: StateFlow<List<ChatTopic>> = topicRepository.observeTopics()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val workspaces: StateFlow<List<Workspace>> = workspaceRepository.observeWorkspaces()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _created = MutableStateFlow<EntityId?>(null)
@@ -44,13 +61,17 @@ class ChatListViewModel(
 
     private var creating = false
 
-    fun newChat() {
+    /** T-022d: null scope = general chat; the picker passes its selection. */
+    fun newChat(scopeType: String? = null, scopeRef: String? = null) {
         if (creating) return
         creating = true
         _error.value = null
         viewModelScope.launch {
             runCatching {
-                chatRepository.createThread(ChatThreadDraft(title = "New chat"), newRequestId())
+                chatRepository.createThread(
+                    ChatThreadDraft(title = "New chat", scopeType = scopeType, scopeRef = scopeRef),
+                    newRequestId(),
+                )
             }.onSuccess { thread ->
                 _created.value = thread.id
             }.onFailure { e ->
@@ -97,6 +118,8 @@ sealed interface ChatComposerMode {
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatThreadViewModel(
     private val chatRepository: ChatRepository,
+    topicRepository: TopicRepository,
+    workspaceRepository: WorkspaceRepository,
     private val threadId: EntityId,
     private val newRequestId: () -> RequestId,
     private val now: () -> Instant,
@@ -119,6 +142,20 @@ class ChatThreadViewModel(
         fetched + extra.filter { it.id !in fetchedIds }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** T-022d: reference data for the header scope picker. */
+    val topics: StateFlow<List<ChatTopic>> = topicRepository.observeTopics()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val workspaces: StateFlow<List<Workspace>> = workspaceRepository.observeWorkspaces()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * T-022d: the server's topic suggestion from the last unscoped send.
+     * A suggestion only — never applied until [applyProposal].
+     */
+    private val _proposedTopic = MutableStateFlow<ChatTopic?>(null)
+    val proposedTopic: StateFlow<ChatTopic?> = _proposedTopic.asStateFlow()
+
     private val _sendState = MutableStateFlow<ChatSendState>(ChatSendState.Idle)
     val sendState: StateFlow<ChatSendState> = _sendState.asStateFlow()
 
@@ -135,12 +172,59 @@ class ChatThreadViewModel(
      * (a lost response after a landed request must not double-send, §11). */
     private var retryRequestId: RequestId? = null
 
+    init {
+        // V-063 pending-reply poll: while a workspace turn is unsettled the
+        // thread wire carries pending_reply — each messages GET lets the
+        // server catch up a turn that settled after its budget. Re-tick on a
+        // slow cadence until the flag clears (e-ink/battery friendly).
+        viewModelScope.launch {
+            thread.collect { t ->
+                if (t?.pendingReply == true) {
+                    // A still-pending refetch re-emits an equal snapshot,
+                    // which the StateFlow dedupes — collect would never
+                    // re-fire and the poll would stall after one tick.
+                    // Drive the cadence from a re-reading loop instead.
+                    while (true) {
+                        delay(PENDING_POLL_MS)
+                        if (thread.value?.pendingReply != true) break
+                        refreshTick.value++
+                    }
+                }
+            }
+        }
+    }
+
     fun onDraftChange(value: String) {
         draft.value = value
     }
 
     fun dismissNotice() {
         _notice.value = null
+    }
+
+    /** T-022d: apply the proposed topic — the chip's explicit Move action. */
+    fun applyProposal() {
+        val topic = _proposedTopic.value ?: return
+        setScope("topic", topic.id)
+    }
+
+    /** T-022d: dismiss the chip — keeps the chat general, no server call. */
+    fun dismissProposal() {
+        _proposedTopic.value = null
+    }
+
+    /** T-022d: re-scope (or clear, nulls) — the header picker's action. */
+    fun setScope(scopeType: String?, scopeRef: String?) {
+        if (_sendState.value is ChatSendState.Sending) return
+        _notice.value = null
+        viewModelScope.launch {
+            runCatching { chatRepository.setScope(threadId, scopeType, scopeRef, newRequestId()) }
+                .onSuccess {
+                    _proposedTopic.value = null
+                    refreshTick.value++
+                }
+                .onFailure { e -> _notice.value = "Scope change failed: ${e.message}" }
+        }
     }
 
     /** Enter edit mode: the draft is seeded and Send rewrites from [message]. */
@@ -283,6 +367,9 @@ class ChatThreadViewModel(
                 .onSuccess { exchange ->
                     overlay.value = overlay.value.filter { it.id != LOCAL_PENDING_ID } +
                         listOfNotNull(exchange.user, exchange.assistant)
+                    // T-022d: surface the server's topic suggestion — a
+                    // suggestion only; the chip applies it explicitly.
+                    _proposedTopic.value = exchange.proposedTopic
                     retryRequestId = null
                     refreshTick.value++ // re-snapshot; overlay ids dedupe out
                     _sendState.value = ChatSendState.Idle

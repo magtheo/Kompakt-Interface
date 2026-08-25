@@ -31,4 +31,12 @@ interface ChatRepository {
      * truncate + send.
      */
     suspend fun truncate(chatId: EntityId, keepThrough: EntityId?, requestId: RequestId)
+
+    /**
+     * T-022d: apply or clear the thread's scope (topic or workspace).
+     * Nulls clear → general chat. The ONLY re-scoping path — propose-chip
+     * Apply and picker changes both land here. Explicit user action;
+     * the server never auto-applies a proposal.
+     */
+    suspend fun setScope(chatId: EntityId, scopeType: String?, scopeRef: String?, requestId: RequestId): ChatThread
 }

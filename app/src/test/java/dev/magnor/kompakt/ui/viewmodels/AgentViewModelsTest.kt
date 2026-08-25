@@ -311,6 +311,8 @@ class AgentRunDetailViewModelTest {
             throw UnsupportedOperationException()
         override suspend fun truncate(chatId: EntityId, keepThrough: EntityId?, requestId: RequestId) =
             throw UnsupportedOperationException()
+        override suspend fun setScope(chatId: EntityId, scopeType: String?, scopeRef: String?, requestId: RequestId) =
+            throw UnsupportedOperationException()
     }
 
     @Test

@@ -12,6 +12,7 @@ import dev.magnor.kompakt.data.fake.FakeStore
 import dev.magnor.kompakt.data.fake.FakeSyncRepository
 import dev.magnor.kompakt.data.fake.FakeTaskRepository
 import dev.magnor.kompakt.data.fake.FakeTodayRepository
+import dev.magnor.kompakt.data.fake.FakeTopicRepository
 import dev.magnor.kompakt.data.fake.FakeWorkspaceRepository
 import dev.magnor.kompakt.data.fake.IdempotencyRegistry
 import dev.magnor.kompakt.data.remote.AlertTransport
@@ -26,6 +27,7 @@ import dev.magnor.kompakt.data.remote.RemoteOrganizationRepository
 import dev.magnor.kompakt.data.remote.RemoteSyncRepository
 import dev.magnor.kompakt.data.remote.RemoteTaskRepository
 import dev.magnor.kompakt.data.remote.RemoteTodayRepository
+import dev.magnor.kompakt.data.remote.RemoteTopicRepository
 import dev.magnor.kompakt.data.remote.RemoteWorkspaceRepository
 import dev.magnor.kompakt.data.repository.AgentRepository
 import dev.magnor.kompakt.data.repository.CaptureRepository
@@ -37,6 +39,7 @@ import dev.magnor.kompakt.data.repository.QueueingCaptureRepository
 import dev.magnor.kompakt.data.repository.SyncRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
+import dev.magnor.kompakt.data.repository.TopicRepository
 import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.data.security.InMemorySecretVault
 import dev.magnor.kompakt.data.security.SecretVault
@@ -53,6 +56,7 @@ import dev.magnor.kompakt.domain.ChangePage
 import dev.magnor.kompakt.domain.ChatExchange
 import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
+import dev.magnor.kompakt.domain.ChatTopic
 import dev.magnor.kompakt.domain.CaptureProposal
 import dev.magnor.kompakt.domain.CaptureResult
 import dev.magnor.kompakt.domain.EntityId
@@ -159,6 +163,7 @@ class AppContainer(
     private val fakeChats = FakeChatRepository(
         threads = threadStore, messages = messageStore,
         idempotency = idempotency, nextId = { nextId("thread") }, now = now,
+        topics = FakeData.topics, workspaces = FakeData.workspaces,
     )
     private val fakeRuns = MutableStateFlow(FakeData.agentRuns.toList())
 
@@ -169,6 +174,9 @@ class AppContainer(
     )
     private val fakeWorkspaces = FakeWorkspaceRepository(
         workspaces = MutableStateFlow(FakeData.workspaces),
+    )
+    private val fakeTopics = FakeTopicRepository(
+        topics = MutableStateFlow(FakeData.topics),
     )
     private val fakeTasks = FakeTaskRepository(
         tasks = taskStore, idempotency = idempotency, nextId = { nextId("task") }, now = now,
@@ -218,6 +226,7 @@ class AppContainer(
         val chats = RemoteChatRepository(api)
         val agents = RemoteAgentRepository(api)
         val workspaces = RemoteWorkspaceRepository(api)
+        val topics = RemoteTopicRepository(api)
         val capture = RemoteCaptureRepository(api)
     }
 
@@ -308,6 +317,7 @@ class AppContainer(
     val chatRepository: ChatRepository = SwitchChat()
     val agentRepository: AgentRepository = SwitchAgent()
     val workspaceRepository: WorkspaceRepository = SwitchWorkspace()
+    val topicRepository: TopicRepository = SwitchTopic()
     val taskRepository: TaskRepository = SwitchTask()
     val noteRepository: NoteRepository = SwitchNote()
     val organizationRepository: OrganizationRepository = SwitchOrganization()
@@ -375,6 +385,8 @@ class AppContainer(
             cur().sendMessage(chatId, text, requestId)
         override suspend fun truncate(chatId: EntityId, keepThrough: EntityId?, requestId: RequestId) =
             cur().truncate(chatId, keepThrough, requestId)
+        override suspend fun setScope(chatId: EntityId, scopeType: String?, scopeRef: String?, requestId: RequestId): ChatThread =
+            cur().setScope(chatId, scopeType, scopeRef, requestId)
     }
 
     private inner class SwitchAgent : AgentRepository {
@@ -399,6 +411,11 @@ class AppContainer(
     private inner class SwitchWorkspace : WorkspaceRepository {
         private fun cur(): WorkspaceRepository = remoteStack?.workspaces ?: fakeWorkspaces
         override fun observeWorkspaces(): Flow<List<Workspace>> = cur().observeWorkspaces()
+    }
+
+    private inner class SwitchTopic : TopicRepository {
+        private fun cur(): TopicRepository = remoteStack?.topics ?: fakeTopics
+        override fun observeTopics(): Flow<List<ChatTopic>> = cur().observeTopics()
     }
 
     private inner class SwitchTask : TaskRepository {

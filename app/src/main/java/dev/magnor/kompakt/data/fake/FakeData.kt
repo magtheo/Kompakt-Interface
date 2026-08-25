@@ -12,6 +12,7 @@ import dev.magnor.kompakt.domain.AgentsSurface
 import dev.magnor.kompakt.domain.Area
 import dev.magnor.kompakt.domain.CalendarEvent
 import dev.magnor.kompakt.domain.ChatThread
+import dev.magnor.kompakt.domain.ChatTopic
 import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.InboxItem
 import dev.magnor.kompakt.domain.InboxPriority
@@ -112,6 +113,16 @@ object FakeData {
         Workspace(ref = "kompakt-interface", label = "Kompakt-Interface"),
         Workspace(ref = "vault-coordinator", label = "Vault Coordinator"),
         Workspace(ref = "dev-server", label = "Dev Server"),
+    )
+
+    /** GET /v1/chat/topics demo payload (T-022d): the sorter's bucket registry. */
+    val topics = listOf(
+        ChatTopic(id = "evershift", label = "Evershift"),
+        ChatTopic(id = "kodeverket", label = "KodeVerket"),
+        ChatTopic(id = "dev-server", label = "Dev Server"),
+        ChatTopic(id = "health", label = "Health"),
+        ChatTopic(id = "career", label = "Career"),
+        ChatTopic(id = "development", label = "Development"),
     )
 
     /** GET /v1/agents demo payload: backends + roles + default. */
@@ -264,6 +275,7 @@ object FakeData {
             createdAt = Instant.parse("2026-08-18T09:00:00Z"),
             updatedAt = Instant.parse("2026-08-21T20:00:00Z"),
             lastMessagePreview = "Pricing model sketch…",
+            scopeType = "topic", scopeRef = "kodeverket", scopeLabel = "KodeVerket",
         ),
         ChatThread(
             id = "thread_003", title = "Linux questions",

@@ -9,6 +9,7 @@ import dev.magnor.kompakt.data.repository.OrganizationRepository
 import dev.magnor.kompakt.data.repository.SyncRepository
 import dev.magnor.kompakt.data.repository.TaskRepository
 import dev.magnor.kompakt.data.repository.TodayRepository
+import dev.magnor.kompakt.data.repository.TopicRepository
 import dev.magnor.kompakt.data.repository.WorkspaceRepository
 import dev.magnor.kompakt.domain.AgentBackendInfo
 import dev.magnor.kompakt.domain.AgentCommand
@@ -32,6 +33,7 @@ import dev.magnor.kompakt.domain.ChangePage
 import dev.magnor.kompakt.domain.ChatExchange
 import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
+import dev.magnor.kompakt.domain.ChatTopic
 import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.InboxItem
 import dev.magnor.kompakt.domain.Message
@@ -74,7 +76,16 @@ class FakeChatRepository(
     private val idempotency: IdempotencyRegistry,
     private val nextId: () -> EntityId,
     private val now: () -> Instant,
+    /** T-022d: label lookup for scope changes (server computes labels). */
+    private val topics: List<ChatTopic> = emptyList(),
+    private val workspaces: List<Workspace> = emptyList(),
 ) : ChatRepository {
+
+    private fun labelFor(type: String?, ref: String?): String? = when (type) {
+        "topic" -> topics.firstOrNull { it.id == ref }?.label ?: ref
+        "workspace" -> workspaces.firstOrNull { it.ref == ref }?.label ?: ref
+        else -> null
+    }
 
     override fun observeThreads(): Flow<List<ChatThread>> =
         threads.observeAll(compareByDescending { it.updatedAt })
@@ -98,6 +109,9 @@ class FakeChatRepository(
                     updatedAt = now(),
                     projectId = draft.projectId,
                     isTemporary = draft.isTemporary,
+                    scopeType = draft.scopeType,
+                    scopeRef = draft.scopeRef,
+                    scopeLabel = labelFor(draft.scopeType, draft.scopeRef),
                 ),
             )
         }
@@ -145,7 +159,17 @@ class FakeChatRepository(
                     )
                 }
             }
-            ChatExchange(user = sent, assistant = reply)
+            // T-022d: unscoped sends propose a topic for the chip — a demo of
+            // the server's deterministic matcher (never auto-applied).
+            val proposal = if (threads.get(chatId)?.scopeType == null) {
+                topics.firstOrNull { t ->
+                    text.contains(t.id, ignoreCase = true) ||
+                        text.contains(t.label, ignoreCase = true)
+                }
+            } else {
+                null
+            }
+            ChatExchange(user = sent, assistant = reply, proposedTopic = proposal)
         }
 
     override suspend fun truncate(chatId: EntityId, keepThrough: EntityId?, requestId: RequestId) =
@@ -168,6 +192,25 @@ class FakeChatRepository(
             }
             Unit
         }
+
+    override suspend fun setScope(
+        chatId: EntityId,
+        scopeType: String?,
+        scopeRef: String?,
+        requestId: RequestId,
+    ): ChatThread = idempotency.once(requestId) {
+        val thread = threads.get(chatId) ?: throw IllegalArgumentException("chat '$chatId' not found")
+        val updated = threads.mutate(thread.id, thread.revision) {
+            it.copy(
+                scopeType = scopeType,
+                scopeRef = scopeRef,
+                scopeLabel = labelFor(scopeType, scopeRef),
+                revision = it.revision + 1,
+                updatedAt = now(),
+            )
+        }
+        updated
+    }
 }
 
 class FakeAgentRepository(
@@ -647,4 +690,11 @@ class FakeWorkspaceRepository(
     private val workspaces: StateFlow<List<Workspace>>,
 ) : WorkspaceRepository {
     override fun observeWorkspaces(): Flow<List<Workspace>> = workspaces
+}
+
+/** T-022d: demo topics come straight from FakeData — a read-only surface. */
+class FakeTopicRepository(
+    private val topics: StateFlow<List<ChatTopic>>,
+) : TopicRepository {
+    override fun observeTopics(): Flow<List<ChatTopic>> = topics
 }
