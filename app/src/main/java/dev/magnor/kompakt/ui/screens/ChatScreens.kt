@@ -134,7 +134,7 @@ fun ChatThreadScreen(
     threadId: EntityId,
     onBack: () -> Unit,
     viewModel: ChatThreadViewModel = containerViewModel(key = "chat-$threadId") {
-        ChatThreadViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, threadId, it::nextRequestId, it.clock)
+        ChatThreadViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it.noteRepository, threadId, it::nextRequestId, it.clock)
     },
 ) {
     val thread by viewModel.thread.collectAsState()
@@ -282,6 +282,7 @@ fun ChatThreadScreen(
                     onEdit = { viewModel.beginEdit(message) },
                     onRevert = { viewModel.revertTo(message) },
                     onRegenerate = viewModel::regenerate,
+                    onSaveNote = { viewModel.saveNote(message) },
                 )
             }
             if (sending) {
@@ -369,6 +370,7 @@ private fun ChatMessageRow(
     onEdit: () -> Unit,
     onRevert: () -> Unit,
     onRegenerate: () -> Unit,
+    onSaveNote: () -> Unit,
 ) {
     val meta = buildString {
         append(if (message.role == MessageRole.USER) "You" else "Assistant")
@@ -403,6 +405,12 @@ private fun ChatMessageRow(
                 if (message.role == MessageRole.USER) {
                     ButtonMMD(onClick = onEdit, modifier = Modifier.weight(1f)) {
                         TextMMD("Edit")
+                    }
+                } else {
+                    // T-022b: explicit transition — the reply text becomes
+                    // an inbox note verbatim (source: this thread).
+                    ButtonMMD(onClick = onSaveNote, modifier = Modifier.weight(1f)) {
+                        TextMMD("Save as note")
                     }
                 }
                 if (canRegenerate) {

@@ -235,6 +235,17 @@ object FakeData {
             projectId = "vault:project:kodeverket", // T-022e: demo project-note join
             createdAt = threeDaysAgo, updatedAt = threeDaysAgo,
         ),
+        // T-022b: scratchpad doc — two dated sections for triage demo
+        Note(
+            id = "note_scratch",
+            role = Note.ROLE_SCRATCHPAD,
+            text = "# Scratchpad\n\n" +
+                "## 2026-08-25 09:12 — Call dentist\n" +
+                "Move the check-up to Thursday afternoon, ask about the night guard refit.\n\n" +
+                "## 2026-08-24 21:03 — Idea: agent UI split\n" +
+                "Agents screen is a process manager, chat is a conversation. Never blend them.",
+            createdAt = yesterday, updatedAt = yesterday,
+        ),
     )
 
     val inboxItems = listOf(

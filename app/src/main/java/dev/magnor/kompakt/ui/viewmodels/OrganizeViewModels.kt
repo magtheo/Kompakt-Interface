@@ -17,8 +17,12 @@ import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.InboxItem
 import dev.magnor.kompakt.domain.Note
 import dev.magnor.kompakt.domain.NoteConflictException
+import dev.magnor.kompakt.domain.NoteDraft
+import dev.magnor.kompakt.domain.NoteSection
+import dev.magnor.kompakt.domain.NoteSections
 import dev.magnor.kompakt.domain.Project
 import dev.magnor.kompakt.domain.RequestId
+import dev.magnor.kompakt.domain.TaskDraft
 import dev.magnor.kompakt.domain.Task
 import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.domain.TaskStatus
@@ -225,6 +229,8 @@ class NotesViewModel(
  */
 class NoteEditorViewModel(
     private val noteRepository: NoteRepository,
+    private val taskRepository: TaskRepository,
+    private val organizationRepository: OrganizationRepository,
     private val noteId: EntityId,
     private val newRequestId: () -> RequestId,
     private val now: () -> Instant,
@@ -247,8 +253,16 @@ class NoteEditorViewModel(
         val conflict: Boolean = false,
         val savedAt: Instant? = null,
         val error: String? = null,
+        /** T-022b: pipeline role — triage UI shows for scratchpad/inbox docs. */
+        val role: String? = null,
+        /** T-022b: `## ` sections of the loaded text (triage cards). */
+        val sections: List<NoteSection> = emptyList(),
+        val triageBusy: Boolean = false,
+        val triageNotice: String? = null,
     ) {
         val canSave: Boolean get() = !loading && !notFound && dirty && !saving
+        val triageable: Boolean
+            get() = role == Note.ROLE_SCRATCHPAD || role == Note.ROLE_INBOX
     }
 
     private var loadedText: String = ""
@@ -260,8 +274,10 @@ class NoteEditorViewModel(
         reload()
     }
 
-    /** Fetch server text + checksum; also the conflict-banner Reload action. */
-    fun reload() {
+    /** Fetch server text + checksum; also the conflict-banner Reload action.
+     *  [keepNotice] carries an in-flight triage notice across the state rebuild
+     *  (the T-022b conflict path reloads while telling the user what happened). */
+    fun reload(keepNotice: Boolean = false) {
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
             try {
@@ -278,7 +294,11 @@ class NoteEditorViewModel(
                         category = note.category,
                         source = note.sourceType?.let { "from ${it.wire} ${note.sourceId ?: ""}".trim() },
                         relativeUpdated = note.updatedAt.relativeTo(now()),
-                    )
+                        role = note.role,
+                        sections = NoteSections.parse(loadedText),
+                    ).let { fresh ->
+                        if (keepNotice) fresh.copy(triageNotice = _state.value.triageNotice) else fresh
+                    }
                 }
             } catch (e: Exception) {
                 _state.value = _state.value.copy(loading = false, error = e.userMessage())
@@ -319,6 +339,114 @@ class NoteEditorViewModel(
                 )
             } catch (e: Exception) {
                 _state.value = _state.value.copy(saving = false, error = e.userMessage())
+            }
+        }
+    }
+
+    // ---- T-022b: section triage (D028 v2 stage 3 — explicit user actions) ----
+
+    /**
+     * "New note in…" targets: Inbox + vault projects only — the server
+     * (V-064) 422s machine projects, so they are never offered (T-022e rule).
+     */
+    val saveTargets: StateFlow<List<Project>> = organizationRepository.observeProjects()
+        .map { projects -> projects.filter { it.id.startsWith("vault:project:") } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** "Append to…" targets: any note except this doc and the scratchpad. */
+    val appendTargets: StateFlow<List<Note>> = noteRepository.observeNotes()
+        .map { notes ->
+            notes.filter { it.id != noteId && it.role != Note.ROLE_SCRATCHPAD }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * File the section as its own note, then remove it from this doc.
+     * Create FIRST (the new file is the external effect) — a crash between
+     * the two calls duplicates the section, which is the safe direction.
+     * Triage-filed notes carry no source_type: provenance is the file
+     * location + git history (server accepts {chat, agent_run, capture,
+     * triage} — none match a client EntityKind, deliberately not forced).
+     */
+    fun newNoteIn(section: NoteSection, target: Project?) = triage { state ->
+        noteRepository.createNote(
+            NoteDraft(
+                text = section.body.ifBlank { section.title },
+                projectId = target?.id,
+            ),
+            newRequestId(),
+        )
+        putSourceWithout(section)
+        if (target == null) "Filed to inbox: ${section.title}" else "Filed to ${target.name}: ${section.title}"
+    }
+
+    /**
+     * Append the section verbatim (heading + body) to an existing note,
+     * then remove it from this doc. Target PUT FIRST — a crash between the
+     * two PUTs duplicates the section, safe direction (documented).
+     */
+    fun appendTo(section: NoteSection, target: Note) = triage { state ->
+        val fresh = noteRepository.getNote(target.id)
+            ?: error("${target.displayTitle} is gone — pick another note")
+        val withSection = fresh.text.orEmpty().trimEnd() +
+            "\n\n## ${section.heading}" +
+            if (section.body.isBlank()) "" else "\n${section.body}"
+        noteRepository.updateNote(target.id, withSection, fresh.checksum!!)
+        putSourceWithout(section)
+        "Appended to ${target.displayTitle}"
+    }
+
+    /** Derive a task from the section title — the section is NOT consumed. */
+    fun createTaskFrom(section: NoteSection) = triage { state ->
+        val task = taskRepository.createTask(
+            TaskDraft(
+                title = section.title,
+                sourceType = EntityKind.NOTE,
+                sourceId = noteId,
+            ),
+            newRequestId(),
+        )
+        "Task created: ${task.title}"
+    }
+
+    /** Remove the section from this doc. Git history is the undo. */
+    fun discard(section: NoteSection) = triage { state ->
+        putSourceWithout(section)
+        "Discarded: ${section.title}"
+    }
+
+    fun dismissTriageNotice() {
+        _state.value = _state.value.copy(triageNotice = null)
+    }
+
+    /** PUT this doc minus the section, under the loaded checksum. */
+    private suspend fun putSourceWithout(section: NoteSection) {
+        val text = NoteSections.remove(loadedText, section)
+        val updated = noteRepository.updateNote(noteId, text, _state.value.checksum!!)
+        loadedText = text
+        _state.value = _state.value.copy(
+            text = text,
+            checksum = updated.checksum,
+            sections = NoteSections.parse(text),
+        )
+    }
+
+    private fun triage(label: suspend (EditorUiState) -> String) {
+        val state = _state.value
+        if (state.triageBusy || state.notFound || state.checksum == null) return
+        _state.value = state.copy(triageBusy = true, triageNotice = null)
+        viewModelScope.launch {
+            try {
+                val message = label(state)
+                _state.value = _state.value.copy(triageBusy = false, triageNotice = message)
+            } catch (e: NoteConflictException) {
+                _state.value = _state.value.copy(
+                    triageBusy = false,
+                    triageNotice = "Changed on the server — reloaded the current version",
+                )
+                reload(keepNotice = true)
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(triageBusy = false, triageNotice = "Failed: ${e.userMessage()}")
             }
         }
     }
