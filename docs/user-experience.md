@@ -232,6 +232,23 @@ Implemented layout rules (T-013/T-014/T-015):
 - threads auto-title from the first user message server-side;
   explicit titles are never overwritten.
 
+Scope tiers (T-022d):
+
+- every thread has a scope — **General**, **Topic** (vault-seeded), or
+  **Workspace** (repo-bound) — shown as a scope row under the thread
+  header and as a label on list rows,
+- the new-chat action expands into a picker (same pattern as the agent
+  workspace picker): General, one row per topic, one row per known
+  workspace,
+- sending on a General thread may surface a "Move to \<topic\>?" chip —
+  Move applies the scope (explicit tap), Not now dismisses it locally;
+  the chip never re-routes a message by itself,
+- Workspace threads show a pending-turn indicator while the backend
+  runs; the reply settles asynchronously and the repo auto-commits per
+  successful turn,
+- re-scoping — or clearing back to General — happens from the header
+  scope row; always an explicit action, never inferred.
+
 ### Chat principles
 
 - multiple persistent threads,
@@ -426,6 +443,16 @@ I think the agent interface should...
 - full-screen text entry is acceptable,
 - project association can happen later,
 - server may suggest classification but not force it.
+
+Implemented model (D028):
+
+- the list is a walk-index of vault files: scratchpad pinned first,
+  then notes newest-first, capped at 200 rows,
+- the editor edits the whole file text; Save sends the text with the
+  checksum it loaded — if the file changed underneath, the server
+  answers 409 with the fresh copy, the editor reloads, nothing is lost,
+- deliberate note saves create individual files under `00 - Inbox/`;
+  quick captures keep using the scratchpad commit path.
 
 ---
 
@@ -665,6 +692,21 @@ Voice should simply be a fast way to fill:
 - task,
 - agent request.
 
+Implemented (T-021 / V-059):
+
+- recording is explicit — tap to start, tap to stop; no background or
+  always-on audio. The clip is a request-scoped temp file on the server
+  and is deleted after transcription, success or failure,
+- the mic appears in all four composers (capture, chat thread, agent
+  dispatch objective, run steering) and is hidden when the feature or
+  capability is absent,
+- button state is glyph-coded — stop square while recording, spinner
+  while uploading, red retry after a failure — with a status line
+  naming the failure reason,
+- the transcript lands as editable text in the draft (empty draft →
+  replace, existing text → space-join); a silent clip answers
+  "Nothing recognized — try again", which is itself the full-loop proof.
+
 ---
 
 ## Chat Response Presentation
@@ -723,6 +765,14 @@ Avoid:
 The notification philosophy should be:
 
 > Interrupt only when there is a reason for the user to act or know now.
+
+Implemented delivery paths (T-019/T-020):
+
+- native in-app SSE while the app is open (`GET /v1/alerts/stream`;
+  unread replay on connect, visually idempotent by alert id),
+- periodic WorkManager sync as the background fallback,
+- local reminder scheduling via AlarmManager for time-critical items,
+- ntfy remains a backup channel only.
 
 ---
 

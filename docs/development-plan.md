@@ -1094,6 +1094,22 @@ Do not delay v0.1 for:
 
 ---
 
+## Implementation status (August 2026)
+
+This plan predates several shipped legs. Per-task truth lives in the
+TASKS.md ledgers of both repos; wire truth in protocol-and-sync.md §30.
+
+Shipped since the last plan sync: file-authoritative notes (V-060a,
+D028), voice input (V-059/T-021), delivery legs T-019/T-020 (native SSE
+foreground, WorkManager fallback, local reminders; ntfy backup only),
+workspace registry + picker (V-061/T-022c), and chat scope tiers
+(V-062/V-063/T-022d: General / vault-seeded Topic / repo-bound
+Workspace with per-turn auto-commit).
+
+In flight: on-device smoke for T-022d; next client tasks T-022e, T-022b.
+
+---
+
 # 21. Recommended Implementation Order
 
 ```text

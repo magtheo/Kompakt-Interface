@@ -115,6 +115,23 @@ The event does not need to contain the complete canonical object.
 
 The client may fetch the updated entity or trigger incremental sync.
 
+**Chosen (V-058 / T-019):** Server-Sent Events. `GET /v1/alerts/stream`
+(feature `agents`, capability `inbox.read`). On connect every unread
+alert replays once — client notification ids are the alert ids, so
+replays are visually idempotent — then live events follow; heartbeat
+comments (~15 s) keep Tailscale/proxies from reaping the connection.
+Wire format per event:
+
+```text
+event: alert
+id: <alert_id>
+data: <inbox-item JSON>
+```
+
+Read state (`POST /v1/inbox/{alert_id}/read`) is the dedupe mechanism —
+no Last-Event-ID cursor. Per D009 the change cursor (§11) remains the
+correctness mechanism; this stream is latency optimization only.
+
 ---
 
 # 4. Background Delivery
@@ -286,24 +303,38 @@ and:
 ```
 
 The exact canonical path must be chosen once during implementation.
+**Chosen (D021):** `GET /v1/capabilities`.
 
-Example response:
+Implemented response shape (values are server state — `agents`/
+`agent_runs` flip to true when the agent backend is configured):
 
 ```json
 {
   "server_protocol": 3,
-  "minimum_client_protocol": 2,
+  "minimum_client_protocol": 1,
   "features": {
     "today": true,
-    "inbox": true,
+    "chat": true,
     "projects": true,
     "areas": true,
-    "agent_runs": true,
-    "voice_capture": false,
-    "offline_capture": true
+    "tasks": true,
+    "notes": true,
+    "inbox": true,
+    "offline_capture": true,
+    "enrollment": true,
+    "voice_transcription": true,
+    "workspaces": true,
+    "agents": false,
+    "agent_runs": false
   }
 }
 ```
+
+Feature gates are enforced per route (flagged-off features answer 501).
+Separately from features, per-device capability grants (`note.read`,
+`note.write`, `chat.read`, `chat.write`, `agent.read`,
+`capture.interpret`, `capture.commit`, `voice.transcribe`, …) are
+checked per request against the device's token (D019).
 
 ---
 
@@ -578,7 +609,10 @@ GET /v1/notes?project_id=...
 GET /v1/notes?area_id=...
 ```
 
-The exact route structure is still open.
+Landed (V-060a / D028): `GET /v1/notes` is a walk-index projection of
+vault files — roles (`scratchpad` pinned first, `inbox`, `note`),
+`project_id`/`area_id`/`category` filters, 200-row cap; detail and
+write contracts in §30.
 
 Adding or changing vault structure should flow through the coordinator into the app projection.
 
@@ -620,6 +654,18 @@ The important semantic rule is:
 
 > The server may propose structure, but the user confirms before structured creation.
 
+Two grounded input paths (August 2026):
+
+- **Voice** (V-059): `POST /v1/voice/transcribe` — multipart `audio`
+  plus optional `language` form field (capability
+  `voice.transcribe`, feature `voice_transcription`) returns
+  `{text, language, duration_s}`. The clip is a request-scoped temp
+  file, deleted after transcription — never persisted (§13 no-retention
+  contract).
+- **Deliberate note saves** (D028): `POST /v1/notes` —
+  `{request_id, title?, text, source_type?, source_id?}` creates an
+  individual file under `00 - Inbox/`; idempotent per §15.
+
 ---
 
 # 21. Chat Connectivity
@@ -634,6 +680,24 @@ If offline:
 The UI may either queue a message explicitly or require connectivity.
 
 The protocol does not require offline multi-message chat.
+
+### Chat scope tiers (T-022d / V-062/V-063, D029)
+
+Threads carry `scope_type`/`scope_ref` (null = general) plus a
+server-resolved `scope_label` and `pending_reply` flag. Reference data:
+`GET /v1/chat/topics` (`{id, label}` — the sorter bucket registry) and
+`GET /v1/workspaces` (`{ref, label}` pairs — paths stay server-side,
+D023).
+
+- Send responses on **unscoped** threads may include
+  `proposed_topic {id, label}` — deterministic, never auto-applied.
+- **Workspace** sends are async: the response carries a `workspace`
+  block with `state` ∈ `unavailable | busy | error | pending | settled`
+  (plus `execution_id`; `committed` on settle). The client polls the
+  thread while `pending_reply` is set (15 s tick).
+- Re-scoping and clearing go through one primitive:
+  `POST /v1/chats/{id}/scope` with `{request_id, scope_type?, scope_ref?}`
+  — absent/null `scope_type` clears. Always an explicit user action.
 
 ---
 
@@ -843,3 +907,87 @@ The protocol/sync layer is ready for v0.1 when:
 - [ ] missed events are recoverable without relying on push history.
 - [ ] low-trust device authorization is enforced server-side.
 - [ ] actual Kompakt behavior is validated when hardware is available.
+
+---
+
+# 30. Implemented Wire Reference (August 2026)
+
+Authoritative field-level contracts as built (server 0.1.1, protocol 3).
+Drift rule: this section changes with the code, in the same task — the
+live smoke and MockWebServer wire tests are the enforcement.
+
+## Envelopes
+
+```text
+ChatThread:  id, title, created_at, updated_at, revision, project_id,
+             is_temporary, scope_type, scope_ref, scope_label,
+             pending_reply, last_message_preview
+Message:     id, chat_id, role, content, created_at, updated_at,
+             revision, status
+Note row:    id, title, preview, category, role, updated_at,
+             + project_id / area_id / source_type / source_id (derived)
+Note detail: row + text (full file incl. frontmatter), checksum
+Task:        id, title, status (open|completed), due_at, project_id,
+             area_id, notes, source_type, source_id, revision,
+             updated_at
+```
+
+## Endpoints
+
+```text
+GET  /v1/capabilities   → {server_protocol, minimum_client_protocol,
+                           features{...}}                    (§8)
+GET  /v1/status         → {healthy, server_time, version}
+
+GET  /v1/workspaces     (agent.read; feature workspaces)
+                         → {workspaces: [{ref, label}], default: null}
+GET  /v1/chat/topics    (chat.read)
+                         → {topics: [{id, label}]}
+
+GET  /v1/chats                       (chat.read)  → {chats: [thread]}
+POST /v1/chats           (chat.write) {request_id, title, project_id?,
+                                        is_temporary?, scope_type?,
+                                        scope_ref?} → {chat}
+GET  /v1/chats/{id}      (chat.read)  → {chat}
+GET  /v1/chats/{id}/messages (chat.read) → {messages: [message]}
+POST /v1/chats/{id}/messages (chat.write) {request_id, text}
+    LLM tiers   → {message, assistant_message, proposed_topic?}
+    workspace   → {message, assistant_message, workspace}
+POST /v1/chats/{id}/scope (chat.write) {request_id, scope_type?,
+                                        scope_ref?} → {chat}
+    absent/null scope_type clears (§21 tiers)
+POST /v1/chats/{id}/truncate (chat.write) {request_id, keep_through?}
+    deletes everything strictly after the anchor (D026)
+
+GET  /v1/notes?project_id&area_id&category (note.read)
+                         → {notes: [row ≤200]}
+GET  /v1/notes/{id}      (note.read)  → {note: detail}
+PUT  /v1/notes/{id}      (note.write) {text, expected_checksum}
+                         → {note}; 409 {reason: checksum_mismatch,
+                         note: fresh}; 422 empty/oversize
+POST /v1/notes           (note.write) {request_id, title?, text,
+                                        source_type?, source_id?}
+
+POST /v1/voice/transcribe (voice.transcribe; multipart audio +
+                         optional language) → {text, language,
+                         duration_s}; 400 bad language; 415 bad type
+POST /v1/capture/interpret {text}
+POST /v1/capture/commit  {request_id, proposed_type (task|note),
+                         title, text?}
+
+GET  /v1/alerts/stream   (SSE — §3)     POST /v1/inbox/{id}/read
+GET  /v1/changes         (cursor — §11)
+```
+
+The agents surface (`/v1/agents`, `/v1/agents/commands`,
+`/v1/agents/dispatch`, `/v1/agent-runs` + `/{id}` `/events` `/result`
+`/send` `/steer` `/cancel` `/command`) is documented alongside the
+agents router and enabled only when the agent backend is configured.
+
+## Workspace send block
+
+```text
+{state: unavailable | busy | error | pending | settled,
+ execution_id?,        # busy-with-run / pending / settled
+ committed?}           # settled only — repo auto-commit outcome
+```
