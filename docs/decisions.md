@@ -675,15 +675,78 @@ than render them.
 
 ---
 
+## D028 — Notes are file-authoritative vault objects; the server is a walk-index over them
+
+**Status:** Accepted (Aug 2026 — coordinator V-060a / app notes leg)
+
+Notes are Markdown files in the Obsidian vault. There is no notes table:
+`GET /v1/notes` walks the vault (PARA layout) on demand and projects rows;
+reads and writes resolve directly to files. The scratchpad file carries
+role `scratchpad` and stays pinned first in the list; files under
+`00 - Inbox/` carry role `inbox`; everything else is role `note`. List
+rows are capped (200) and carry `id/title/preview/category/role/
+updated_at` plus optional `project_id` (`vault:project:<x>`), `area_id`
+(`vault:area:<x>`), `source_type`/`source_id` derived from path and
+frontmatter. Detail adds the full `text` (frontmatter included) and a
+`checksum`.
+
+Write path: `PUT /v1/notes/{id}` is a text write-through with an
+optimistic lock — the client sends `expected_checksum`; on mismatch the
+server answers 409 with the fresh note attached, the client reloads, and
+nothing is lost. `POST /v1/notes` (deliberate save) creates an individual
+file under `00 - Inbox/`, idempotent per `request_id` because file + git
+commit are external effects (§15). Every mutation lands as a vault git
+commit — the vault remains the durable store and the coordinator stays a
+projection (D001/D004 lineage).
+
+---
+
+## D029 — Chat has three explicit scope tiers; re-scoping is one endpoint and never automatic
+
+**Status:** Accepted (Aug 2026 — coordinator V-062/V-063 / app T-022d)
+
+A chat thread carries `scope_type` + `scope_ref` (both null = general):
+
+- **General** — unscoped conversation against the swappable LLM backend
+  (D024). Sends on unscoped threads may return a `proposed_topic`
+  `{id, label}` chip computed by the deterministic sorter rules
+  (alias-in-first-line 5 / keyword-in-first-line 3 / keyword-in-body 2,
+  threshold 3, registry order breaks ties) — a proposal only; the server
+  never applies it.
+- **Topic** — vault-seeded context. The topic registry IS the notes
+  sorter's bucket registry (one source of truth, exposed as
+  `GET /v1/chat/topics`); the bucket's `00 - Inbox/*.md` seed files land
+  in the first assistant reply of a scoped thread.
+- **Workspace** — repo-bound execution via OpenCode, not the chat LLM
+  (D025 lineage). Sends are async: the thread flips `pending_reply`,
+  the reply settles later, and each successful turn auto-commits the
+  repo (`committed: true/false` on settle).
+
+All re-scoping — chip Apply, picker change, un-scope back to General —
+goes through exactly one primitive, `POST /v1/chats/{id}/scope`
+(idempotent, `chat.write`-gated; absent/null `scope_type` clears the
+scope). Scope changes are always explicit user actions, mirroring the
+capture confirm rule (§20): the system may propose, never re-route
+silently. The client polls the thread while `pending_reply` is set
+(15 s tick); the change cursor (§11) remains the correctness mechanism
+for settlement.
+
+---
+
 ## Deferred Decisions
 
 The following remain intentionally open:
 
+- ~~SSE vs WebSocket for foreground transport~~ — **resolved Aug 2026**:
+  SSE via `GET /v1/alerts/stream` (V-058 / T-019); unread replay on
+  connect, heartbeat comments, read-state dedupe (no Last-Event-ID),
+- ~~whether server-side STT is enabled in v0.1~~ — **resolved Aug 2026**:
+  yes; CPU faster-whisper behind `POST /v1/voice/transcribe`
+  (V-059 / T-021),
+
 - exact canonical capabilities endpoint path ~~(D021: `GET /v1/capabilities`)~~,
-- SSE vs WebSocket for foreground transport,
 - final WorkManager fallback interval,
 - exact ntfy topic/payload format,
-- whether server-side STT is enabled in v0.1,
 - exact APK update mechanism,
 - physical-button integration,
 - exact calendar data integration,

@@ -237,8 +237,14 @@ id
 title
 createdAt
 updatedAt
+revision
 projectId?
 isTemporary?
+scopeType?        # null = general | "topic" | "workspace"
+scopeRef?
+scopeLabel?       # server-resolved display label
+pendingReply      # workspace tier: async turn in flight
+lastMessagePreview
 ```
 
 ---
@@ -311,13 +317,18 @@ actions[]
 ### Note
 
 ```text
-id
-text
-createdAt
+id                # vault-relative file ref
+title
+preview
+category          # PARA-derived
+role              # scratchpad | inbox | note
 updatedAt
-projectId?
-sourceType?
+projectId?        # vault:project:<x> when nested under a project
+areaId?           # vault:area:<x>
+sourceType?       # from frontmatter
 sourceId?
+text              # detail only — full file text incl. frontmatter
+checksum          # detail only — optimistic-lock token for edits
 ```
 
 ---
@@ -393,39 +404,31 @@ Do not create an arbitrary remote-code UI protocol.
 
 The API should be deliberately narrow.
 
-Possible initial endpoints:
+Implemented v0.1 catalog (protocol 3; field-level contracts in
+protocol-and-sync.md §30):
 
 ```text
-GET  /v1/today
-GET  /v1/inbox
-
-GET  /v1/chats
-POST /v1/chats
-GET  /v1/chats/{id}
-POST /v1/chats/{id}/messages
-
-GET  /v1/agents
-GET  /v1/agents/{id}
-GET  /v1/agent-runs
-GET  /v1/agent-runs/{id}
-POST /v1/agent-runs
-POST /v1/agent-runs/{id}/actions
-
-GET  /v1/tasks
-POST /v1/tasks
-PATCH /v1/tasks/{id}
-
-GET  /v1/notes
-POST /v1/notes
-PATCH /v1/notes/{id}
-
-GET  /v1/projects
-GET  /v1/projects/{id}
-
-POST /v1/capture
+GET  /v1/capabilities          GET  /v1/status
+GET  /v1/today                 GET  /v1/inbox
+POST /v1/inbox/{alert_id}/read GET  /v1/alerts/stream   (SSE)
+GET  /v1/changes               GET  /v1/projects
+GET  /v1/areas                 GET  /v1/tasks
+GET  /v1/notes                 GET  /v1/notes/{id}
+PUT  /v1/notes/{id}            POST /v1/notes
+GET  /v1/chats                 POST /v1/chats
+GET  /v1/chats/{id}            GET  /v1/chats/{id}/messages
+POST /v1/chats/{id}/messages   POST /v1/chats/{id}/scope
+POST /v1/chats/{id}/truncate   GET  /v1/chat/topics
+GET  /v1/workspaces            POST /v1/voice/transcribe
+POST /v1/capture/interpret     POST /v1/capture/commit
 ```
 
-Exact endpoint design is still open.
+Plus the agents surface (`/v1/agents`, `/v1/agents/commands`,
+`/v1/agents/dispatch`, `/v1/agent-runs` + `/{id}` `/events` `/result`
+`/send` `/steer` `/cancel` `/command`), enabled when the agent backend
+is configured.
+
+Exact endpoint design is deliberately frozen — see the catalog above.
 
 The important decision is that the API should expose **capabilities**, not shell access.
 
