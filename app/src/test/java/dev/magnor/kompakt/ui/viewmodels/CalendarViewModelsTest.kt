@@ -73,6 +73,20 @@ class CalendarViewModelsTest {
     }
 
     @Test
+    fun `today is selected initially and goToToday restores it`() = runTest {
+        val repo = FakeCalendarRepository()
+        val vm = CalendarViewModel(repo, now, zone) { "r" }
+
+        assertEquals(LocalDate.parse("2026-08-22"), vm.state.value.selectedDay)
+
+        vm.nextMonth()
+        vm.selectDay(LocalDate.parse("2026-09-15"))
+        vm.goToToday()
+        assertEquals(YearMonth.parse("2026-08"), vm.state.value.month)
+        assertEquals(LocalDate.parse("2026-08-22"), vm.state.value.selectedDay)
+    }
+
+    @Test
     fun `window fetch lands seeded events on their Oslo day`() = runTest {
         val repo = FakeCalendarRepository()
         val vm = CalendarViewModel(repo, now, zone) { "r" }

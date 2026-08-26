@@ -152,6 +152,7 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
             composable(Routes.TODAY) {
                 TodayScreen(
                     onOpenInbox = { navController.navigate(Routes.INBOX) },
+                    onOpenCalendar = { navController.navigate(Routes.CALENDAR) },
                     onOpenAttention = { item ->
                         navController.navigate(Routes.fromInboxItem(item))
                     },

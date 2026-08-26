@@ -64,6 +64,9 @@ class CalendarViewModel(
     private val _state = MutableStateFlow(
         CalendarUiState(
             month = now.toLocalDateTime(zone).date.yearMonth,
+            // Opens with today selected — the agenda is visible on entry
+            // (T-023a plan: Today date-header enters "at today, selected").
+            selectedDay = now.toLocalDateTime(zone).date,
             zone = zone,
             now = now,
         ),
@@ -82,6 +85,12 @@ class CalendarViewModel(
     /** Month navigation — clamps the selected day into the new month. */
     fun previousMonth() = shiftMonth(-1)
     fun nextMonth() = shiftMonth(1)
+
+    /** Today button — jump back to the current month with today selected. */
+    fun goToToday() {
+        _state.update { s -> s.copy(month = s.today.yearMonth, selectedDay = s.today) }
+        loadWindow()
+    }
 
     private fun shiftMonth(delta: Int) {
         _state.update { s ->
