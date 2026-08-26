@@ -31,15 +31,22 @@ object Routes {
     const val INBOX = "inbox"
     const val ITEM_DETAIL = "item/{itemId}"
     const val CAPTURE = "capture"
+    const val CALENDAR = "calendar"
+
+    /** T-023: event detail / editor. Ids may be occurrences (`~slot`). */
+    const val EVENT_DETAIL = "event/{eventId}"
+
+    /** Editor — eventId "new" creates; optional date prefill (YYYY-MM-DD). */
+    const val EVENT_EDITOR = "event/{eventId}/edit?date={date}"
     const val SETTINGS = "settings"
     const val DIAGNOSTICS = "diagnostics"
 
-    /** All screen patterns — exactly one entry per screen (19). */
+    /** All screen patterns — exactly one entry per screen (22). */
     val all: List<String> = listOf(
         TODAY, CHAT_LIST, CHAT_THREAD, AGENTS_LIST, AGENT_DETAIL,
         AGENT_RUN_DETAIL, MORE, ORGANIZE, PROJECTS, PROJECT_DETAIL, AREAS,
         TASKS_PATTERN, NOTES, NOTE_EDITOR, INBOX, ITEM_DETAIL, CAPTURE,
-        SETTINGS, DIAGNOSTICS,
+        CALENDAR, EVENT_DETAIL, EVENT_EDITOR, SETTINGS, DIAGNOSTICS,
     )
 
     fun chatThread(id: String) = "chat/$id"
@@ -48,6 +55,11 @@ object Routes {
     fun item(id: String) = "item/$id"
     fun projectDetail(id: String) = "organize/projects/$id"
     fun noteEditor(id: String) = "organize/notes/$id/edit"
+    fun eventDetail(id: String) = "event/$id"
+
+    /** [eventId] is a real id, or "new" to compose from scratch. */
+    fun eventEditor(eventId: String, date: String? = null): String =
+        if (date == null) "event/$eventId/edit" else "event/$eventId/edit?date=$date"
 
     /**
      * Deep-link route for an inbox / Today attention item (T-018).

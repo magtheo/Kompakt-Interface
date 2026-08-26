@@ -89,6 +89,31 @@ class HttpApi(
         return execute(request)
     }
 
+    /** Raw PATCH with a JSON body (T-023 events; V-065). Same failure
+     *  taxonomy as [put] — occurrence PATCHes create server-side exceptions. */
+    suspend fun patch(
+        path: String,
+        bodyJson: String,
+    ): String {
+        val request = Request.Builder()
+            .patch(bodyJson.toRequestBody("application/json".toMediaType()))
+            .url(url(path))
+            .build()
+        return execute(request)
+    }
+
+    /** Raw DELETE with an opaque id segment in the path. Same failure
+     *  taxonomy as [post]; we do NOT consume the response here — callers
+     *  decide whether to read it or not. For /v1/events/{id} returns 200
+     *  + body (not 204); the caller treats success as true and ignores body. */
+    suspend fun delete(path: String): String {
+        val request = Request.Builder()
+            .delete()
+            .url(url(path))
+            .build()
+        return execute(request)
+    }
+
     /** Raw POST with a multipart body (T-021 voice upload). Same failure
      *  taxonomy as [post]; [timeoutSeconds] for long server work. */
     suspend fun postMultipart(

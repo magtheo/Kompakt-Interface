@@ -575,6 +575,7 @@ class FakeCaptureRepository(
     private val notes: FakeNoteRepository,
     private val chats: FakeChatRepository,
     private val agents: FakeAgentRepository,
+    private val calendars: FakeCalendarRepository,
     private val idempotency: IdempotencyRegistry,
     private val now: () -> Instant,
 ) : CaptureRepository {
@@ -587,14 +588,27 @@ class FakeCaptureRepository(
     override suspend fun interpret(input: String): CaptureProposal {
         val text = input.trim().trimEnd('.')
         val lower = text.lowercase()
-        val isTask = TASK_HINTS.any { lower.startsWith(it) || lower.contains(" $it") }
+        val isEvent = EVENT_HINTS.any { lower.startsWith(it) || lower.contains(" $it") }
+        val isTask = !isEvent && TASK_HINTS.any { lower.startsWith(it) || lower.contains(" $it") }
         val tomorrow = lower.contains("tomorrow")
+        val dayOffset: Long = if (tomorrow) 86_400L else 0L
         return CaptureProposal(
-            proposedType = if (isTask) CaptureType.TASK else CaptureType.NOTE,
+            proposedType = when {
+                isEvent -> CaptureType.EVENT
+                isTask -> CaptureType.TASK
+                else -> CaptureType.NOTE
+            },
             title = text.take(80),
             text = text,
             dueAt = if (isTask && tomorrow) {
                 Instant.fromEpochSeconds(now().epochSeconds + 86_400)
+            } else {
+                null
+            },
+            // Fake events always get a start so quick-confirm works in demo
+            // mode; the server fills real times from the phrase.
+            startAt = if (isEvent) {
+                Instant.fromEpochSeconds(now().epochSeconds + dayOffset)
             } else {
                 null
             },
@@ -637,11 +651,38 @@ class FakeCaptureRepository(
                         "$requestId#run",
                     ),
                 )
+                CaptureType.EVENT -> {
+                    val start = proposal.startAt
+                        ?: throw CaptureRejectedException("event without start")
+                    val calendar = calendars.observeCalendars().first()
+                        .firstOrNull { it.writable }
+                        ?: throw CaptureRejectedException("no writable calendar")
+                    val created = calendars.createEvent(
+                        requestId,
+                        dev.magnor.kompakt.domain.EventDraft(
+                            calendarId = calendar.id,
+                            title = proposal.title,
+                            startAt = start.toString(),
+                            endAt = proposal.endAt?.toString(),
+                            allDay = proposal.allDay ?: false,
+                            description = proposal.text,
+                        ),
+                    )
+                    CaptureResult.EventCreated(
+                        calendars.events.value.first { it.id == created.id },
+                    )
+                }
                 CaptureType.UNKNOWN -> throw CaptureRejectedException("unknown capture type")
             }
         }
 
     companion object {
+        /** Mirrors the coordinator's _EVENT_PREFIX (capture.py) — event-first
+         *  phrases propose EVENT so demo mode exercises the T-023 path. */
+        private val EVENT_HINTS = listOf(
+            "avtale ", "møte ", "event ", "meeting ",
+        )
+
         private val TASK_HINTS = listOf(
             "call ", "buy ", "send ", "review ", "fix ", "renew ", "book ",
             "submit ", "remind", "check ", "pay ", "email ", "write ", "order ",
@@ -662,6 +703,7 @@ class FakeSyncRepository(
             "today" to true,
             "chat" to true,
             "agents" to true,
+            "calendar" to true,
             "projects" to true,
             "areas" to true,
             "tasks" to true,

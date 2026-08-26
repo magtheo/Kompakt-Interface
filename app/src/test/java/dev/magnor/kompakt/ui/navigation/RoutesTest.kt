@@ -11,7 +11,8 @@ class RoutesTest {
 
     @Test
     fun everyScreenHasExactlyOneRoute() {
-        assertEquals(19, Routes.all.size)
+        // 22 = 19 (T-018) + calendar, event detail, event editor (T-023).
+        assertEquals(22, Routes.all.size)
         assertEquals(Routes.all.size, Routes.all.toSet().size)
     }
 

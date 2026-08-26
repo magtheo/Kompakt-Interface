@@ -41,17 +41,31 @@ object FakeData {
 
     val calendarEvents = listOf(
         CalendarEvent(
-            id = "event_001",
+            id = "personal:event_001",
             title = "Philosophy",
             startAt = Instant.parse("2026-08-22T09:00:00Z"),
             endAt = Instant.parse("2026-08-22T10:30:00Z"),
             location = "HG N-301",
+            allDay = false,
+            symbol = "●",
         ),
         CalendarEvent(
-            id = "event_002",
+            id = "personal:event_002",
             title = "Dentist",
             startAt = Instant.parse("2026-08-22T12:30:00Z"),
             endAt = Instant.parse("2026-08-22T13:15:00Z"),
+            description = "Regular checkup",
+            allDay = false,
+            symbol = "●",
+        ),
+        // All-day event from SA registry (read-only) — tests verify symbol + write suppression
+        CalendarEvent(
+            id = "sa:series-001~occ",
+            title = "SA meeting",
+            startAt = Instant.fromEpochSeconds(0), // midnight marker; all_day=true
+            endAt = null,
+            allDay = true,
+            symbol = "○",
         ),
     )
 

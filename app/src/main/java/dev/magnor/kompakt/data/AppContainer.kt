@@ -18,6 +18,14 @@ import dev.magnor.kompakt.data.fake.IdempotencyRegistry
 import dev.magnor.kompakt.data.remote.AlertTransport
 import dev.magnor.kompakt.data.remote.HttpApi
 import dev.magnor.kompakt.data.remote.SseAlertTransport
+import dev.magnor.kompakt.data.remote.RemoteCalendarRepository
+import dev.magnor.kompakt.data.repository.CalendarRepository
+import dev.magnor.kompakt.domain.CalendarEvent
+import dev.magnor.kompakt.domain.CalendarInfo
+import dev.magnor.kompakt.domain.EventCreateResult
+import dev.magnor.kompakt.domain.EventDraft
+import dev.magnor.kompakt.domain.EventUpdate
+import dev.magnor.kompakt.data.fake.FakeCalendarRepository
 import dev.magnor.kompakt.data.remote.RemoteAgentRepository
 import dev.magnor.kompakt.data.remote.RemoteCaptureRepository
 import dev.magnor.kompakt.data.remote.RemoteChatRepository
@@ -81,7 +89,7 @@ import dev.magnor.kompakt.domain.UnauthorizedException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -200,11 +208,16 @@ class AppContainer(
         notes = fakeNotes,
         now = now,
     )
+    /** Single fake calendar — shared by the demo calendar and capture→event
+     *  commits, so created events appear in both (T-023). */
+    private val fakeCalendar = FakeCalendarRepository(FakeData.calendarEvents)
+
     private val fakeCapture = FakeCaptureRepository(
         tasks = fakeTasks,
         notes = fakeNotes,
         chats = fakeChats,
         agents = fakeAgents,
+        calendars = fakeCalendar,
         idempotency = idempotency,
         now = now,
     )
@@ -228,6 +241,7 @@ class AppContainer(
         val workspaces = RemoteWorkspaceRepository(api)
         val topics = RemoteTopicRepository(api)
         val capture = RemoteCaptureRepository(api)
+        val calendars = RemoteCalendarRepository(api)
     }
 
     @Volatile
@@ -323,6 +337,7 @@ class AppContainer(
     val organizationRepository: OrganizationRepository = SwitchOrganization()
     val inboxRepository: InboxRepository = SwitchInbox()
     val todayRepository: TodayRepository = SwitchToday()
+    val calendarRepository: CalendarRepository = SwitchCalendar()
 
     val captureRepository: CaptureRepository =
         QueueingCaptureRepository(SwitchCapture(), pendingCaptures) { flushPendingCaptures() }
@@ -464,6 +479,19 @@ class AppContainer(
         private fun cur(): TodayRepository = remoteStack?.today ?: fakeToday
         override suspend fun today(): TodayProjection = cur().today()
         override fun observeToday(): Flow<TodayProjection> = cur().observeToday()
+    }
+
+    private inner class SwitchCalendar : CalendarRepository {
+        // Uses the shared top-level fakeCalendar — capture→event commits write
+        // to the same instance so both surfaces stay consistent.
+        private fun cur(): CalendarRepository = remoteStack?.calendars ?: fakeCalendar
+        override fun observeCalendars(): Flow<List<CalendarInfo>> = cur().observeCalendars()
+        override suspend fun fetchWindow(from: String, to: String): List<CalendarEvent> = cur().fetchWindow(from, to)
+        override suspend fun fetchEvent(id: String): CalendarEvent? = cur().fetchEvent(id)
+        override suspend fun createEvent(requestId: String, draft: EventDraft): EventCreateResult =
+            cur().createEvent(requestId, draft)
+        override suspend fun updateEvent(id: String, patch: EventUpdate): Boolean = cur().updateEvent(id, patch)
+        override suspend fun deleteEvent(id: String): Boolean = cur().deleteEvent(id)
     }
 
     private inner class SwitchCapture : CaptureRepository {

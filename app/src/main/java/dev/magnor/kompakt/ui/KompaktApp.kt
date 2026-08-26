@@ -33,10 +33,13 @@ import dev.magnor.kompakt.ui.screens.AgentDetailScreen
 import dev.magnor.kompakt.ui.screens.AgentRunDetailScreen
 import dev.magnor.kompakt.ui.screens.AgentsListScreen
 import dev.magnor.kompakt.ui.screens.AreasScreen
+import dev.magnor.kompakt.ui.screens.CalendarScreen
 import dev.magnor.kompakt.ui.screens.CaptureScreen
 import dev.magnor.kompakt.ui.screens.ChatListScreen
 import dev.magnor.kompakt.ui.screens.ChatThreadScreen
 import dev.magnor.kompakt.ui.screens.DiagnosticsScreen
+import dev.magnor.kompakt.ui.screens.EventDetailScreen
+import dev.magnor.kompakt.ui.screens.EventEditorScreen
 import dev.magnor.kompakt.ui.screens.InboxScreen
 import dev.magnor.kompakt.ui.screens.ItemDetailScreen
 import dev.magnor.kompakt.ui.screens.MoreScreen
@@ -48,6 +51,8 @@ import dev.magnor.kompakt.ui.screens.ProjectsScreen
 import dev.magnor.kompakt.ui.screens.SettingsScreen
 import dev.magnor.kompakt.ui.screens.TasksScreen
 import dev.magnor.kompakt.ui.screens.TodayScreen
+import dev.magnor.kompakt.ui.viewmodels.CalendarViewModel
+import dev.magnor.kompakt.ui.viewmodels.EventViewModel
 import dev.magnor.kompakt.ui.viewmodels.TasksViewModel
 
 /**
@@ -193,6 +198,7 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
                 MoreScreen(
                     onOpenOrganize = { navController.navigate(Routes.ORGANIZE) },
                     onOpenInbox = { navController.navigate(Routes.INBOX) },
+                    onOpenCalendar = { navController.navigate(Routes.CALENDAR) },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     showInbox = surfaces.inboxEntry,
                 )
@@ -301,6 +307,66 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
                 CaptureScreen(
                     onDone = { navController.popBackStack() },
                     onBack = { navController.popBackStack() },
+                )
+            }
+            composable(Routes.CALENDAR) {
+                CalendarScreen(
+                    viewModel = containerViewModel(key = "calendar") {
+                        CalendarViewModel(
+                            calendarRepository = it.calendarRepository,
+                            now = it.now(),
+                            newRequestId = it::nextRequestId,
+                        )
+                    },
+                    onBack = { navController.popBackStack() },
+                    onOpenEvent = { navController.navigate(Routes.eventDetail(it)) },
+                    onNewEvent = { day -> navController.navigate(Routes.eventEditor("new", day.toString())) },
+                )
+            }
+            composable(
+                route = Routes.EVENT_DETAIL,
+                arguments = listOf(
+                    navArgument("eventId") { type = NavType.StringType },
+                ),
+            ) { entry ->
+                val eventId = entry.arguments?.getString("eventId").orEmpty()
+                EventDetailScreen(
+                    eventId = eventId,
+                    onBack = { navController.popBackStack() },
+                    onEdit = { navController.navigate(Routes.eventEditor(it)) },
+                    viewModel = containerViewModel(key = "event-$eventId") {
+                        EventViewModel(
+                            calendarRepository = it.calendarRepository,
+                            now = it.now(),
+                            newRequestId = it::nextRequestId,
+                        )
+                    },
+                )
+            }
+            composable(
+                route = Routes.EVENT_EDITOR,
+                arguments = listOf(
+                    navArgument("eventId") { type = NavType.StringType },
+                    navArgument("date") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+            ) { entry ->
+                val eventId = entry.arguments?.getString("eventId").orEmpty()
+                val date = entry.arguments?.getString("date")
+                EventEditorScreen(
+                    eventId = eventId,
+                    initialDate = date,
+                    onDone = { navController.popBackStack() },
+                    viewModel = containerViewModel(key = "event-editor-$eventId") {
+                        EventViewModel(
+                            calendarRepository = it.calendarRepository,
+                            now = it.now(),
+                            newRequestId = it::nextRequestId,
+                        )
+                    },
                 )
             }
             composable(Routes.SETTINGS) {
