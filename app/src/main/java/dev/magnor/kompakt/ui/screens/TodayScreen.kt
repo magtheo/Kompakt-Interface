@@ -1,6 +1,7 @@
 package dev.magnor.kompakt.ui.screens
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -13,19 +14,9 @@ import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.InboxItem
 import dev.magnor.kompakt.ui.containerViewModel
-import dev.magnor.kompakt.ui.inCalendarZone
 import dev.magnor.kompakt.ui.relativeTo
 import dev.magnor.kompakt.ui.timeOfDay
 import dev.magnor.kompakt.ui.viewmodels.TodayViewModel
-import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDate
-
-private fun headerDateLabel(now: Instant): String {
-    val day = now.inCalendarZone().date
-    val weekday = day.dayOfWeek.name.lowercase().take(3).replaceFirstChar { it.uppercase() }
-    val month = day.month.name.lowercase().take(3).replaceFirstChar { it.uppercase() }
-    return "$weekday ${day.dayOfMonth} $month"
-}
 
 /**
  * Today — operational overview. A view, not a source of truth.
@@ -47,6 +38,10 @@ fun TodayScreen(
     AppScreen(
         title = "Today",
         actions = {
+            // D030 entry, icon-only — minimal footprint next to the bell.
+            IconButton(onClick = onOpenCalendar) {
+                Icon(Icons.Filled.CalendarMonth, contentDescription = "Calendar")
+            }
             if (showInboxAction) {
                 IconButton(onClick = onOpenInbox) {
                     Icon(Icons.Filled.Notifications, contentDescription = "Inbox")
@@ -60,13 +55,6 @@ fun TodayScreen(
                 ListRow(title = state.error ?: "Could not load")
             projection == null -> ListRow(title = "Loading…")
             else -> {
-                // T-023a plan / D030: date-header tap → Calendar (opens on today).
-                ListRow(
-                    title = headerDateLabel(viewModel.now),
-                    trailing = "Calendar ›",
-                    onClick = onOpenCalendar,
-                )
-
                 SectionLabel("Next")
                 if (projection.events.isEmpty()) {
                     ListRow(title = "No more events today")
