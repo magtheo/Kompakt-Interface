@@ -55,6 +55,7 @@ fun CalendarScreen(
         title = "Calendar",
         onBack = onBack,
         actions = {
+            OutlinedButtonMMD(onClick = { viewModel.goToToday() }) { TextMMD("Today") }
             OutlinedButtonMMD(onClick = { viewModel.previousMonth() }) { TextMMD("<") }
             TextMMD(
                 text = monthLabel(state.month),
