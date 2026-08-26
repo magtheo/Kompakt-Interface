@@ -38,7 +38,7 @@ fun CaptureScreen(
     onDone: () -> Unit,
     onBack: () -> Unit,
     viewModel: CaptureViewModel = containerViewModel {
-        CaptureViewModel(it.captureRepository, it::nextRequestId)
+        CaptureViewModel(it.captureRepository, it.calendarRepository, it::nextRequestId)
     },
 ) {
     val state by viewModel.state.collectAsState()
@@ -122,7 +122,8 @@ private fun nextCaptureType(current: CaptureType): CaptureType = when (current) 
     CaptureType.TASK -> CaptureType.NOTE
     CaptureType.NOTE -> CaptureType.CHAT
     CaptureType.CHAT -> CaptureType.AGENT_REQUEST
-    CaptureType.AGENT_REQUEST, CaptureType.UNKNOWN -> CaptureType.TASK
+    CaptureType.AGENT_REQUEST -> CaptureType.EVENT
+    CaptureType.EVENT, CaptureType.UNKNOWN -> CaptureType.TASK
 }
 
 /** Diagnostics — capability negotiation + sync state (Settings → Diagnostics). */

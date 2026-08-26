@@ -5,6 +5,7 @@ import dev.magnor.kompakt.domain.ServerUnavailableException
 import dev.magnor.kompakt.domain.UnauthorizedException
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -59,3 +60,13 @@ fun Throwable.userMessage(): String = when (this) {
     is ServerUnavailableException -> "Server error (HTTP $code) — try again later"
     else -> "Could not load: ${message ?: "unknown error"}"
 }
+
+/**
+ * T-023 calendar display zone. Naive user input (dates, HH:MM) is
+ * interpreted here; wire format stays UTC Z (protocol V-065).
+ */
+val CalendarZone: TimeZone = TimeZone.of("Europe/Oslo")
+
+/** Render an instant in [CalendarZone] (calendar screens only). */
+fun Instant.inCalendarZone(): LocalDateTime =
+    toLocalDateTime(CalendarZone)

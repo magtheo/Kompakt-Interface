@@ -3,13 +3,17 @@ package dev.magnor.kompakt.ui.viewmodels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.magnor.kompakt.data.repository.CaptureRepository
+import dev.magnor.kompakt.data.repository.CalendarRepository
+import dev.magnor.kompakt.domain.CalendarEvent
 import dev.magnor.kompakt.domain.CaptureProposal
 import dev.magnor.kompakt.domain.CaptureResult
 import dev.magnor.kompakt.domain.CaptureType
+import dev.magnor.kompakt.domain.EventDraft
 import dev.magnor.kompakt.domain.RequestId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -20,6 +24,7 @@ import kotlinx.coroutines.launch
  */
 class CaptureViewModel(
     private val captureRepository: CaptureRepository,
+    private val calendarRepository: CalendarRepository,
     private val newRequestId: () -> RequestId,
 ) : ViewModel() {
 
@@ -67,7 +72,8 @@ class CaptureViewModel(
             CaptureType.TASK -> CaptureType.NOTE
             CaptureType.NOTE -> CaptureType.CHAT
             CaptureType.CHAT -> CaptureType.AGENT_REQUEST
-            CaptureType.AGENT_REQUEST, CaptureType.UNKNOWN -> CaptureType.TASK
+            CaptureType.AGENT_REQUEST -> CaptureType.EVENT
+            CaptureType.EVENT, CaptureType.UNKNOWN -> CaptureType.TASK
         }
         _state.update { it.copy(proposal = current.copy(proposedType = next)) }
     }
@@ -78,7 +84,13 @@ class CaptureViewModel(
         if (_state.value.working) return
         _state.update { it.copy(working = true, error = null) }
         viewModelScope.launch {
-            runCatching { captureRepository.commit(proposal, requestId) }
+            runCatching {
+                if (proposal.proposedType == CaptureType.EVENT) {
+                    commitEvent(proposal, requestId)
+                } else {
+                    captureRepository.commit(proposal, requestId)
+                }
+            }
                 .onSuccess { result ->
                     _state.update { it.copy(working = false, result = describe(result)) }
                 }
@@ -88,11 +100,52 @@ class CaptureViewModel(
         }
     }
 
+    /**
+     * Events bypass /v1/capture/commit (server 501s on kind=event) — POST
+     * /v1/events directly, same request id for idempotent replay (T-023).
+     */
+    private suspend fun commitEvent(proposal: CaptureProposal, requestId: RequestId): CaptureResult {
+        val start = proposal.startAt
+            ?: throw IllegalArgumentException("Event needs a start time")
+        val calendar = calendarRepository.observeCalendars().first()
+            .let { regs ->
+                proposal.calendarId
+                    ?.let { id -> regs.firstOrNull { it.id == id } }
+                    ?: regs.firstOrNull { it.writable }
+            }
+            ?: throw IllegalArgumentException("No writable calendar")
+        val created = calendarRepository.createEvent(
+            requestId,
+            EventDraft(
+                calendarId = calendar.id,
+                title = proposal.title,
+                startAt = start.toString(),
+                endAt = proposal.endAt?.toString(),
+                allDay = proposal.allDay ?: false,
+                description = proposal.text,
+            ),
+        )
+        val event = calendarRepository.fetchEvent(created.id)
+        return CaptureResult.EventCreated(
+            event ?: CalendarEvent(
+                id = created.id,
+                title = proposal.title,
+                startAt = start,
+                endAt = proposal.endAt,
+                description = proposal.text,
+                allDay = proposal.allDay ?: false,
+                symbol = calendar.symbol,
+                calendarId = calendar.id,
+            ),
+        )
+    }
+
     private fun describe(result: CaptureResult): String = when (result) {
         is CaptureResult.TaskCreated -> "Task created: ${result.task.title}"
         is CaptureResult.NoteCreated -> "Saved to scratchpad: ${result.note.displayTitle}"
         is CaptureResult.ChatCreated -> "Chat created: ${result.thread.title}"
         is CaptureResult.AgentRequested -> "Agent run queued: ${result.run.title}"
+        is CaptureResult.EventCreated -> "Event created: ${result.event.title}"
         CaptureResult.QueuedOffline -> "Saved offline — will send when the server is reachable"
     }
 }

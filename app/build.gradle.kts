@@ -33,6 +33,9 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // datetime 0.7.x arithmetic is marked ExperimentalTime; global opt-in
+        // keeps call sites clean (T-023 upgrade).
+        freeCompilerArgs += "-opt-in=kotlin.time.ExperimentalTime"
     }
     buildFeatures {
         compose = true

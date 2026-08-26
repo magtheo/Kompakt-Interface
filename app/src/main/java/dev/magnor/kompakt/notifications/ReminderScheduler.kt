@@ -8,7 +8,7 @@ import android.os.Build
 import dev.magnor.kompakt.KompaktApplication
 import dev.magnor.kompakt.domain.CalendarEvent
 import dev.magnor.kompakt.domain.KompaktJson
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString

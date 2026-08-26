@@ -23,13 +23,18 @@ import dev.magnor.kompakt.ui.viewmodels.TasksViewModel
 fun MoreScreen(
     onOpenOrganize: () -> Unit,
     onOpenInbox: () -> Unit,
+    onOpenCalendar: () -> Unit,
     onOpenSettings: () -> Unit,
     showInbox: Boolean = true,
+    showCalendar: Boolean = true,
 ) {
     AppScreen(title = "More") {
         ListRow(title = "Organize", subtitle = "Projects · Areas · Tasks · Notes", onClick = onOpenOrganize)
         if (showInbox) {
             ListRow(title = "Inbox", subtitle = "Things from any subsystem that need you", onClick = onOpenInbox)
+        }
+        if (showCalendar) {
+            ListRow(title = "Calendar", subtitle = "Month view · events", onClick = onOpenCalendar)
         }
         ListRow(title = "Settings", subtitle = "Enrollment · Sync · About", onClick = onOpenSettings)
     }
