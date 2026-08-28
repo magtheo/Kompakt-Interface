@@ -25,6 +25,7 @@ import com.mudita.mmd.components.nav_bar.NavigationBarMMD
 import com.mudita.mmd.components.nav_bar.NavigationBarItemMMD
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.data.AppContainer
+import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.SurfaceGating
 import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.ui.navigation.Routes
@@ -257,7 +258,7 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
                 val projectId = entry.arguments?.getString("projectId")
                 val areaId = entry.arguments?.getString("areaId")
                 TasksScreen(
-                    onOpenItem = { navController.navigate(Routes.item(it)) },
+                    onOpenItem = { navController.navigate(Routes.item(it, EntityKind.TASK)) },
                     onBack = { navController.popBackStack() },
                     viewModel = containerViewModel(key = "tasks-$projectId-$areaId") {
                         TasksViewModel(
@@ -298,9 +299,20 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable(Routes.ITEM_DETAIL) { entry ->
+            composable(
+                route = Routes.ITEM_DETAIL,
+                arguments = listOf(
+                    navArgument("itemId") { type = NavType.StringType },
+                    navArgument("kind") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+            ) { entry ->
                 ItemDetailScreen(
                     itemId = entry.arguments?.getString("itemId").orEmpty(),
+                    kind = Routes.itemKind(entry.arguments?.getString("kind")),
                     onBack = { navController.popBackStack() },
                 )
             }

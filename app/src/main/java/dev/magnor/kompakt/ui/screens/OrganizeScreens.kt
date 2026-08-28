@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import dev.magnor.kompakt.domain.EntityId
+import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.InboxItem
 import dev.magnor.kompakt.domain.ProjectStatus
 import dev.magnor.kompakt.domain.TaskStatus
@@ -353,8 +354,9 @@ fun InboxScreen(
 @Composable
 fun ItemDetailScreen(
     itemId: EntityId,
+    kind: EntityKind? = null,
     onBack: () -> Unit,
-    viewModel: ItemDetailViewModel = containerViewModel(key = "item-$itemId") {
+    viewModel: ItemDetailViewModel = containerViewModel(key = "item-$itemId-${kind?.wire ?: "any"}") {
         ItemDetailViewModel(
             taskRepository = it.taskRepository,
             noteRepository = it.noteRepository,
@@ -362,6 +364,7 @@ fun ItemDetailScreen(
             inboxRepository = it.inboxRepository,
             organizationRepository = it.organizationRepository,
             itemId = itemId,
+            kind = kind,
             now = it.now(),
         )
     },

@@ -29,7 +29,7 @@ object Routes {
     const val NOTES = "organize/notes"
     const val NOTE_EDITOR = "organize/notes/{noteId}/edit"
     const val INBOX = "inbox"
-    const val ITEM_DETAIL = "item/{itemId}"
+    const val ITEM_DETAIL = "item/{itemId}?kind={kind}"
     const val CAPTURE = "capture"
     const val CALENDAR = "calendar"
 
@@ -52,7 +52,19 @@ object Routes {
     fun chatThread(id: String) = "chat/$id"
     fun agent(backend: String, name: String) = "agents/$backend/$name"
     fun run(id: String) = "runs/$id"
-    fun item(id: String) = "item/$id"
+
+    /**
+     * T-025: kind-aware item detail. A known kind (task rows) lets the
+     * screen fetch the one typed repository instead of the generic
+     * fan-out; null keeps the fan-out fallback (inbox deep links, where
+     * only the resolver knows the shape).
+     */
+    fun item(id: String, kind: EntityKind? = null): String =
+        if (kind == null) "item/$id" else "item/$id?kind=${kind.wire}"
+
+    /** Parse the kind nav arg; unknown/absent values → null (fallback). */
+    fun itemKind(wire: String?): EntityKind? =
+        wire?.let { w -> EntityKind.entries.firstOrNull { it != EntityKind.UNKNOWN && it.wire == w } }
     fun projectDetail(id: String) = "organize/projects/$id"
     fun noteEditor(id: String) = "organize/notes/$id/edit"
     fun eventDetail(id: String) = "event/$id"

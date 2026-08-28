@@ -4,6 +4,7 @@ import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.InboxItem
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,6 +33,21 @@ class RoutesTest {
         assertEquals("agents/warren/pi", Routes.agent("warren", "pi"))
         assertEquals("runs/run_001", Routes.run("run_001"))
         assertEquals("item/task", Routes.item("task"))
+        // T-025: kind-aware builders — null kind keeps the bare route
+        // (fallback leg), a kind appends the wire query param.
+        assertEquals("item/task?kind=task", Routes.item("task", EntityKind.TASK))
+    }
+
+    @Test
+    fun itemKindParsesWireValues() {
+        // T-025: nav-arg parsing — exact wire match, junk and the
+        // UNKNOWN sentinel degrade to null (generic fallback leg).
+        assertEquals(EntityKind.TASK, Routes.itemKind("task"))
+        assertEquals(EntityKind.AGENT_RUN, Routes.itemKind("agent_run"))
+        assertNull(Routes.itemKind(null))
+        assertNull(Routes.itemKind(""))
+        assertNull(Routes.itemKind("junk"))
+        assertNull(Routes.itemKind("unknown"))
     }
 
     @Test
