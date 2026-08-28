@@ -496,6 +496,7 @@ class ItemDetailViewModel(
     inboxRepository: InboxRepository,
     organizationRepository: OrganizationRepository,
     itemId: EntityId,
+    kind: EntityKind? = null,
     val now: Instant,
 ) : ViewModel() {
 
@@ -513,43 +514,63 @@ class ItemDetailViewModel(
         val source: String? = null,
     )
 
-    val state: StateFlow<ItemUiState> = combine(
-        taskRepository.observeTask(itemId),
-        noteRepository.observeNote(itemId),
-        agentRepository.observeRun(itemId),
-        inboxRepository.observeInbox().map { list -> list.firstOrNull { it.id == itemId } },
-        organizationRepository.observeProjects(),
-    ) { task, note, run, inboxItem, projects ->
-        when {
-            task != null -> ItemUiState(
-                found = true, kind = "Task", title = task.title,
-                subtitle = task.notes, status = task.status.wire,
-                due = task.dueAt?.let { "${it.dayLabel(now)} ${it.timeOfDay()}" },
-                project = task.projectId?.let { pid -> projects.firstOrNull { it.id == pid }?.name },
-                revision = task.revision,
-                source = task.sourceType?.let { "from ${it.wire} ${task.sourceId ?: ""}".trim() },
-            )
-            note != null -> ItemUiState(
-                found = true, kind = "Note", title = note.displayTitle,
-                subtitle = note.text, revision = note.revision,
-                project = note.projectId?.let { pid -> projects.firstOrNull { it.id == pid }?.name },
-                source = note.sourceType?.let { "from ${it.wire} ${note.sourceId ?: ""}".trim() },
-            )
-            run != null -> ItemUiState(
-                found = true, kind = "Agent run", title = run.displayTitle,
-                subtitle = run.prompt, status = run.state.wire,
-                source = "${run.agent} @ ${run.backend}",
-            )
-            inboxItem != null -> ItemUiState(
-                found = true, kind = "Inbox", title = inboxItem.title,
-                subtitle = inboxItem.summary, revision = inboxItem.revision,
-                source = inboxItem.sourceType?.wire,
-            )
-            else -> ItemUiState()
-        }
+    private fun taskUi(task: Task?, projects: List<Project>) = if (task == null) {
+        ItemUiState()
+    } else {
+        ItemUiState(
+            found = true, kind = "Task", title = task.title,
+            subtitle = task.notes, status = task.status.wire,
+            due = task.dueAt?.let { "${it.dayLabel(now)} ${it.timeOfDay()}" },
+            project = task.projectId?.let { pid -> projects.firstOrNull { it.id == pid }?.name },
+            revision = task.revision,
+            source = task.sourceType?.let { "from ${it.wire} ${task.sourceId ?: ""}".trim() },
+        )
     }
-        .catch { e -> emit(ItemUiState(found = false, title = e.userMessage())) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ItemUiState())
+
+    /**
+     * T-025: with a known kind the screen fetches the ONE typed
+     * repository. The projects list is a display join only — losing it
+     * (403, offline) degrades the name to null, never the entity itself.
+     */
+    val state: StateFlow<ItemUiState> =
+        if (kind == EntityKind.TASK) {
+            combine(
+                taskRepository.observeTask(itemId),
+                organizationRepository.observeProjects().catch { emit(emptyList()) },
+            ) { task, projects -> taskUi(task, projects) }
+                .catch { e -> emit(ItemUiState(found = false, title = e.userMessage())) }
+        } else {
+            combine(
+                taskRepository.observeTask(itemId),
+                noteRepository.observeNote(itemId),
+                agentRepository.observeRun(itemId),
+                inboxRepository.observeInbox().map { list -> list.firstOrNull { it.id == itemId } },
+                organizationRepository.observeProjects(),
+            ) { task, note, run, inboxItem, projects ->
+                when {
+                    task != null -> taskUi(task, projects)
+                    note != null -> ItemUiState(
+                        found = true, kind = "Note", title = note.displayTitle,
+                        subtitle = note.text, revision = note.revision,
+                        project = note.projectId?.let { pid -> projects.firstOrNull { it.id == pid }?.name },
+                        source = note.sourceType?.let { "from ${it.wire} ${note.sourceId ?: ""}".trim() },
+                    )
+                    run != null -> ItemUiState(
+                        found = true, kind = "Agent run", title = run.displayTitle,
+                        subtitle = run.prompt, status = run.state.wire,
+                        source = "${run.agent} @ ${run.backend}",
+                    )
+                    inboxItem != null -> ItemUiState(
+                        found = true, kind = "Inbox", title = inboxItem.title,
+                        subtitle = inboxItem.summary, revision = inboxItem.revision,
+                        source = inboxItem.sourceType?.wire,
+                    )
+                    else -> ItemUiState()
+                }
+            }
+                .catch { e -> emit(ItemUiState(found = false, title = e.userMessage())) }
+        }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ItemUiState())
 }
 
 /** Agent activity helper for screens that show runs compactly. */
