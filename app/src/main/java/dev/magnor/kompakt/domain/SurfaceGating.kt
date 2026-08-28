@@ -35,8 +35,6 @@ object SurfaceGating {
         val notesEntry: Boolean,
         val captureFab: Boolean,
         val inboxEntry: Boolean,
-        val agentsSectionOnToday: Boolean,
-        val recentNoteOnToday: Boolean,
     )
 
     fun evaluate(caps: CapabilitySet): Surfaces = Surfaces(
@@ -45,8 +43,6 @@ object SurfaceGating {
         notesEntry = caps.supports(FEATURE_NOTES) && caps.grants(CAP_NOTE_READ),
         captureFab = caps.supports(FEATURE_CAPTURE) && caps.grants(CAP_CAPTURE_INTERPRET),
         inboxEntry = caps.supports(FEATURE_INBOX) && caps.grants(CAP_INBOX_READ),
-        agentsSectionOnToday = caps.supports(FEATURE_AGENTS) && caps.grants(CAP_AGENT_READ),
-        recentNoteOnToday = caps.supports(FEATURE_NOTES) && caps.grants(CAP_NOTE_READ),
     )
 
     /** Demo set for Fake mode — every surface visible. */

@@ -33,8 +33,6 @@ class SurfaceGatingTest {
         assertTrue(s.notesEntry)
         assertTrue(s.captureFab)
         assertTrue(s.inboxEntry)
-        assertTrue(s.agentsSectionOnToday)
-        assertTrue(s.recentNoteOnToday)
     }
 
     @Test
@@ -54,8 +52,6 @@ class SurfaceGatingTest {
         assertFalse(s.agentsTab)
         assertFalse(s.notesEntry)
         assertFalse(s.captureFab)
-        assertFalse(s.agentsSectionOnToday)
-        assertFalse(s.recentNoteOnToday)
         assertTrue("inbox stays visible", s.inboxEntry)
     }
 
@@ -77,8 +73,6 @@ class SurfaceGatingTest {
         assertTrue(s.notesEntry)
         assertTrue(s.captureFab)
         assertTrue(s.inboxEntry)
-        assertTrue(s.agentsSectionOnToday)
-        assertTrue(s.recentNoteOnToday)
     }
 
     // ── T-024 / V-069: device grants ────────────────────────────────────
@@ -100,9 +94,7 @@ class SurfaceGatingTest {
         assertFalse("chat.read not granted", s.chatTab)
         assertFalse("agent.read not granted", s.agentsTab)
         assertFalse("capture.interpret not granted", s.captureFab)
-        assertFalse("agent.read not granted", s.agentsSectionOnToday)
         assertTrue("note.read granted + flag on", s.notesEntry)
-        assertTrue("note.read granted + flag on", s.recentNoteOnToday)
         assertTrue("inbox.read granted + flag on", s.inboxEntry)
     }
 
@@ -145,7 +137,5 @@ class SurfaceGatingTest {
         assertTrue(s.notesEntry)
         assertTrue(s.captureFab)
         assertTrue(s.inboxEntry)
-        assertTrue(s.agentsSectionOnToday)
-        assertTrue(s.recentNoteOnToday)
     }
 }

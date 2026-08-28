@@ -38,6 +38,20 @@ fun Instant.relativeTo(now: Instant): String {
     }
 }
 
+/** Future-facing counterpart to [relativeTo] — hero "in 45m / in 2h / tomorrow 09:00". */
+fun Instant.untilLabel(now: Instant, zone: TimeZone = TimeZone.currentSystemDefault()): String {
+    val local = toLocalDateTime(zone)
+    val days = local.date.toEpochDays() - now.toLocalDateTime(zone).date.toEpochDays()
+    val seconds = (this - now).inWholeSeconds
+    return when {
+        seconds <= 0 -> "now"
+        days == 0L && seconds < 3_600 -> "in ${seconds / 60}m"
+        days == 0L -> "in ${seconds / 3_600}h"
+        days == 1L -> "tomorrow %02d:%02d".format(local.hour, local.minute)
+        else -> local.date.toString()
+    }
+}
+
 /** Due-date bucket label: Today / Tomorrow / Overdue / date. */
 fun Instant.dayLabel(now: Instant): String {
     val zone = TimeZone.UTC

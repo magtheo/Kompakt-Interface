@@ -158,8 +158,6 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
                         navController.navigate(Routes.fromInboxItem(item))
                     },
                     showInboxAction = surfaces.inboxEntry,
-                    showAgentsSection = surfaces.agentsSectionOnToday,
-                    showRecentNote = surfaces.recentNoteOnToday,
                 )
             }
             composable(Routes.CHAT_LIST) {

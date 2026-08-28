@@ -76,21 +76,23 @@ fun ListRow(
     title: String,
     subtitle: String? = null,
     trailing: String? = null,
+    /** Visual de-emphasis (past events, completed rows) — weight only, monochrome-safe. */
+    secondary: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
     if (onClick != null) {
         CardMMD(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            ListRowContent(title, subtitle, trailing)
+            ListRowContent(title, subtitle, trailing, secondary)
         }
     } else {
         CardMMD(modifier = Modifier.fillMaxWidth()) {
-            ListRowContent(title, subtitle, trailing)
+            ListRowContent(title, subtitle, trailing, secondary)
         }
     }
 }
 
 @Composable
-private fun ListRowContent(title: String, subtitle: String?, trailing: String?) {
+private fun ListRowContent(title: String, subtitle: String?, trailing: String?, secondary: Boolean = false) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -98,7 +100,10 @@ private fun ListRowContent(title: String, subtitle: String?, trailing: String?) 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.padding(end = 8.dp).weight(1f)) {
-            TextMMD(text = title, fontWeight = FontWeight.SemiBold)
+            TextMMD(
+                text = title,
+                fontWeight = if (secondary) FontWeight.Normal else FontWeight.SemiBold,
+            )
             if (subtitle != null) {
                 TextMMD(text = subtitle)
             }
