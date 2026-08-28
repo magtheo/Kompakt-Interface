@@ -19,6 +19,15 @@ object SurfaceGating {
     const val FEATURE_INBOX = "inbox"
     const val FEATURE_CAPTURE = "offline_capture"
 
+    // Device-grant capability names (protocol §13; DEFAULT_DEVICE_CAPABILITIES,
+    // src/auth.py). A surface needs BOTH its feature flag (server-wide) and,
+    // when the device's granted set is known (V-069), its read grant.
+    const val CAP_CHAT_READ = "chat.read"
+    const val CAP_AGENT_READ = "agent.read"
+    const val CAP_NOTE_READ = "note.read"
+    const val CAP_INBOX_READ = "inbox.read"
+    const val CAP_CAPTURE_INTERPRET = "capture.interpret"
+
     /** Which user-visible surfaces exist for a given capability snapshot. */
     data class Surfaces(
         val chatTab: Boolean,
@@ -31,13 +40,13 @@ object SurfaceGating {
     )
 
     fun evaluate(caps: CapabilitySet): Surfaces = Surfaces(
-        chatTab = caps.supports(FEATURE_CHAT),
-        agentsTab = caps.supports(FEATURE_AGENTS),
-        notesEntry = caps.supports(FEATURE_NOTES),
-        captureFab = caps.supports(FEATURE_CAPTURE),
-        inboxEntry = caps.supports(FEATURE_INBOX),
-        agentsSectionOnToday = caps.supports(FEATURE_AGENTS),
-        recentNoteOnToday = caps.supports(FEATURE_NOTES),
+        chatTab = caps.supports(FEATURE_CHAT) && caps.grants(CAP_CHAT_READ),
+        agentsTab = caps.supports(FEATURE_AGENTS) && caps.grants(CAP_AGENT_READ),
+        notesEntry = caps.supports(FEATURE_NOTES) && caps.grants(CAP_NOTE_READ),
+        captureFab = caps.supports(FEATURE_CAPTURE) && caps.grants(CAP_CAPTURE_INTERPRET),
+        inboxEntry = caps.supports(FEATURE_INBOX) && caps.grants(CAP_INBOX_READ),
+        agentsSectionOnToday = caps.supports(FEATURE_AGENTS) && caps.grants(CAP_AGENT_READ),
+        recentNoteOnToday = caps.supports(FEATURE_NOTES) && caps.grants(CAP_NOTE_READ),
     )
 
     /** Demo set for Fake mode — every surface visible. */

@@ -108,14 +108,16 @@ class ItemDetailViewModelTest {
     }
 
     /** Counts observeNote calls — must stay 0 on the typed leg. */
-    private class TestNoteRepository : NoteRepository {
+    private class TestNoteRepository(private val fail: Boolean = false) : NoteRepository {
         var observeCalls = 0
         override fun observeNotes(projectId: EntityId?, areaId: EntityId?): Flow<List<Note>> =
-            flow { emit(emptyList()) }
+            if (fail) flow { throw RepositoryException("capability 'note.read' required") }
+            else flow { emit(emptyList()) }
 
         override fun observeNote(id: EntityId): Flow<Note?> {
             observeCalls++
-            return flow { emit(null) }
+            return if (fail) flow { throw RepositoryException("capability 'note.read' required") }
+            else flow { emit(null) }
         }
 
         override suspend fun getNote(id: EntityId): Note? = null
@@ -158,11 +160,15 @@ class ItemDetailViewModelTest {
         ): AgentRun = throw UnsupportedOperationException()
     }
 
-    private class TestInboxRepository(private val items: List<InboxItem> = emptyList()) : InboxRepository {
+    private class TestInboxRepository(
+        private val items: List<InboxItem> = emptyList(),
+        private val fail: Boolean = false,
+    ) : InboxRepository {
         var observeCalls = 0
         override fun observeInbox(): Flow<List<InboxItem>> {
             observeCalls++
-            return flow { emit(items) }
+            return if (fail) flow { throw RepositoryException("capability 'inbox.read' required") }
+            else flow { emit(items) }
         }
 
         override suspend fun dismiss(id: EntityId, expectedRevision: Long, requestId: RequestId) =
@@ -292,6 +298,33 @@ class ItemDetailViewModelTest {
             assertEquals("Inbox", state.kind)
             assertEquals("Capture landed", state.title)
             assertTrue("fallback probes the inbox", inboxRepo.observeCalls >= 1)
+        } finally {
+            job.cancel()
+        }
+    }
+
+    @Test
+    fun `fallback leg survives failing probes without collapsing`() = runTest(UnconfinedTestDispatcher()) {
+        // T-024: every display-only probe degrades independently — a 403 on
+        // notes/inbox/projects must leave a quiet not-found screen, not an
+        // error crash. (Task and agent-run probes still emit null by default.)
+        val noteRepo = TestNoteRepository(fail = true)
+        val inboxRepo = TestInboxRepository(fail = true)
+
+        val model = vm(
+            TestTaskRepository(emptyMap()),
+            noteRepo = noteRepo,
+            inboxRepo = inboxRepo,
+            orgRepo = TestOrgRepository(failProjects = true),
+            itemId = "vikunja:task:42",
+            kind = null,
+        )
+        val job = launch { model.state.collect {} }
+        try {
+            val state = model.state.value
+            assertFalse("failed probes degrade to not-found, not an error", state.found)
+            assertTrue("probe still ran and degraded", noteRepo.observeCalls >= 1)
+            assertTrue("probe still ran and degraded", inboxRepo.observeCalls >= 1)
         } finally {
             job.cancel()
         }

@@ -2,6 +2,7 @@ package dev.magnor.kompakt.data.remote
 
 import dev.magnor.kompakt.domain.KompaktJson
 import dev.magnor.kompakt.domain.Note
+import dev.magnor.kompakt.domain.ForbiddenException
 import dev.magnor.kompakt.domain.NoteConflictException
 import dev.magnor.kompakt.domain.OfflineException
 import dev.magnor.kompakt.domain.RepositoryException
@@ -193,11 +194,23 @@ class HttpApi(
             when {
                 it.isSuccessful -> body
                 it.code == 401 -> throw UnauthorizedException()
+                it.code == 403 -> throw forbidden(body)
                 it.code == 409 -> throw conflict(body)
                 it.code in 500..599 -> throw ServerUnavailableException(it.code)
                 else -> throw RepositoryException("server rejected (HTTP ${it.code}): $body")
             }
         }
+    }
+
+    /**
+     * A 403 carries `{"detail": "capability 'x' required"}` when the
+     * device's granted capability set lacks `x` (require_capability,
+     * src/auth.py). Extract `x` so the UI can name the missing grant
+     * (T-024); other 403 shapes keep capability == null.
+     */
+    private fun forbidden(body: String): ForbiddenException {
+        val capability = Regex("capability '([^']+)' required").find(body)?.groupValues?.get(1)
+        return ForbiddenException(capability)
     }
 
     /**
