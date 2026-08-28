@@ -733,6 +733,23 @@ for settlement.
 
 ---
 
+## D031 — Today is a three-tab surface (NOW / TASKS / ATTENTION) with one scope-limited mutation
+
+Today renders as three swipeable/tappable tabs instead of five stacked
+sections. Each tab has exactly one dominant element (a NEXT-UP hero card, a
+checkbox task list, a stack of attention cards); empty sections do not render
+at all. The Agents section and Recent-note row are removed from Today —
+agents stay reachable via More → Agents and attention deep-links; their
+future placement in the UI is explicitly open.
+
+Quick-complete (tap ○ → ✓ on the TASKS tab) is the single deliberate
+exception to "Today is a view, not a source of truth". It rides the existing
+revision-guarded `completeTask` mutation; NOW and ATTENTION remain pure
+views. No other mutation may be added to Today without a new decision.
+
+(D030 is reserved for the calendar surface decision recorded in
+`docs/plans/2026-08-25-t023-calendar.md`.)
+
 ## Deferred Decisions
 
 The following remain intentionally open:
