@@ -125,36 +125,47 @@ An alternative five-item navigation may be considered later if real-device testi
 
 Today should be the default opening screen.
 
-It is an overview, not a management surface.
+It is an overview, not a management surface — one exception granted by
+D031: quick-complete on the TASKS tab.
 
-Example:
+T-026 redesigned it as **three swipe/tap tabs** (E-Ink aware: touch is
+fast, refresh rate is the constraint — one refresh per tab switch):
 
 ```text
 ┌────────────────────────────┐
-│ SAT 22 AUG                 │
+│ Today · Fri 28 Aug    📅 🔔 │
 ├────────────────────────────┤
-│ NEXT                       │
-│ 12:30 Dentist              │
+│ NOW   TASKS 3   ATTENTION 1│
 ├────────────────────────────┤
-│ TASKS                      │
-│ ○ Review PR                │
+│ ┌────────────────────────┐ │
+│ │ NEXT UP                │ │
+│ │ Dentist                │ │
+│ │ 15:00 · in 1h          │ │
+│ └────────────────────────┘ │
+│ LATER                      │
+│ 17:00 Team sync            │
+│ EARLIER                    │
+│ 09:00 Standup        (dim) │
+│ · now ·                    │
+│ ANYTIME                    │
 │ ○ Buy groceries            │
-│ ✓ Workout                  │
-├────────────────────────────┤
-│ NEEDS ATTENTION            │
-│ ● Agent needs approval     │
-│ ● 1 overdue task           │
-├────────────────────────────┤
-│ AGENTS                     │
-│ ● Research running         │
-│ ✓ Audit complete           │
-├────────────────────────────┤
-│       🎙 CAPTURE            │
 └────────────────────────────┘
 ```
 
+- **NOW** — hero NEXT UP card (falls through to tomorrow's first event
+  when today is empty), relative times, now-marker timeline, untimed
+  tasks in an Anytime band. A view: no mutations.
+- **TASKS** — due-today list with whole-row quick-complete (D031),
+  Done-today section below, static notice line for conflicts/errors.
+- **ATTENTION** — one bordered card per item, deep-links preserved (T-018).
+
+Agents and recent note were cut from Today (Aug 2026); agent results
+surface as ATTENTION items. Agent placement in the UI is explicitly
+reopened for a later decision.
+
 ### Rules
 
+- empty sections render nothing — no wall of placeholder rows,
 - show only a small number of high-value items,
 - avoid long lists,
 - use "See all" when needed,

@@ -5,6 +5,7 @@ import dev.magnor.kompakt.domain.OfflineException
 import dev.magnor.kompakt.domain.ServerUnavailableException
 import dev.magnor.kompakt.domain.UnauthorizedException
 import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -47,5 +48,15 @@ class FormatTest {
             "Could not load: boom",
             IllegalStateException("boom").userMessage(),
         )
+    }
+
+    @Test
+    fun `untilLabel renders future buckets`() {
+        val now = Instant.parse("2026-08-28T12:00:00Z")
+        assertEquals("now", Instant.parse("2026-08-28T12:00:00Z").untilLabel(now, TimeZone.UTC))
+        assertEquals("in 45m", Instant.parse("2026-08-28T12:45:00Z").untilLabel(now, TimeZone.UTC))
+        assertEquals("in 3h", Instant.parse("2026-08-28T15:00:00Z").untilLabel(now, TimeZone.UTC))
+        assertEquals("tomorrow 09:00", Instant.parse("2026-08-29T09:00:00Z").untilLabel(now, TimeZone.UTC))
+        assertEquals("2026-09-02", Instant.parse("2026-09-02T09:00:00Z").untilLabel(now, TimeZone.UTC))
     }
 }
