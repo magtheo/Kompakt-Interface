@@ -1,5 +1,6 @@
 package dev.magnor.kompakt.ui
 
+import dev.magnor.kompakt.domain.ForbiddenException
 import dev.magnor.kompakt.domain.OfflineException
 import dev.magnor.kompakt.domain.ServerUnavailableException
 import dev.magnor.kompakt.domain.UnauthorizedException
@@ -29,6 +30,14 @@ class FormatTest {
         assertEquals(
             "Device not authorized — re-enroll in Settings",
             UnauthorizedException().userMessage(),
+        )
+        assertEquals(
+            "Missing permission (project.read) — re-approve device in Settings",
+            ForbiddenException("project.read").userMessage(),
+        )
+        assertEquals(
+            "Missing permission — re-approve device in Settings",
+            ForbiddenException(null).userMessage(),
         )
         assertEquals(
             "Server error (HTTP 500) — try again later",

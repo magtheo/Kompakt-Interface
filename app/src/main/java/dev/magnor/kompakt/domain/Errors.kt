@@ -28,6 +28,22 @@ class CaptureRejectedException(val reason: String) :
 class UnauthorizedException :
     RepositoryException("device not authorized — enrollment required")
 
+/**
+ * 403: the device's granted capability set (server-side approval, V-066
+ * bundles) doesn't include this capability. The remedy is re-approval on
+ * the server — not retrying or reconnecting — so the UI must say exactly
+ * that (T-024; Aug 27 incident: pixel-4a-5g lacked `project.read` and the
+ * app rendered generic error screens).
+ */
+class ForbiddenException(val capability: String?) :
+    RepositoryException(
+        if (capability != null) {
+            "missing capability '$capability' — device needs re-approval"
+        } else {
+            "forbidden — device needs re-approval"
+        },
+    )
+
 /** Transport-level failure: no route to server, timeout, DNS. UI offers retry. */
 class OfflineException(cause: Throwable) :
     RepositoryException("offline: ${cause.message ?: cause::class.simpleName}")

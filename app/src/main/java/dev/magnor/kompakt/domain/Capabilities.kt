@@ -16,9 +16,30 @@ data class CapabilitySet(
     @SerialName("server_protocol") val serverProtocol: Int,
     @SerialName("minimum_client_protocol") val minimumClientProtocol: Int,
     val features: Map<String, Boolean> = emptyMap(),
+    /**
+     * T-024 / V-069: the device's OWN granted capabilities, served only
+     * when the caller is a device principal. Null on older servers (and
+     * demo/local sets) — treated as "grants unknown", i.e. fail-open:
+     * surface gating falls back to feature flags alone (§9 behavior).
+     */
+    val granted: GrantedCapabilities? = null,
 ) {
     fun supports(feature: String): Boolean = features[feature] ?: false
+
+    /**
+     * True when `capability` is within this device's granted set. A null
+     * [granted] (old server, demo, local) grants everything — capability
+     * hiding must never brick a client on an unupgraded server.
+     */
+    fun grants(capability: String): Boolean = granted?.capabilities?.contains(capability) ?: true
 }
+
+/** Device-scoped grants block of /v1/capabilities (V-069). */
+@Serializable
+data class GrantedCapabilities(
+    @SerialName("device_id") val deviceId: String,
+    val capabilities: List<String> = emptyList(),
+)
 
 @Serializable
 data class ServerStatus(

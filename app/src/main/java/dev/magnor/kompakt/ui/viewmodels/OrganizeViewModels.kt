@@ -65,7 +65,12 @@ class ProjectsViewModel(
     )
 
     val state: StateFlow<ProjectsUiState> =
-        combine(organizationRepository.observeProjects(), taskRepository.observeTasks()) { projects, tasks ->
+        combine(
+            organizationRepository.observeProjects(),
+            // T-024: open-count join is display-only — degrade to zero
+            // counts on failure instead of killing the projects list.
+            taskRepository.observeTasks().catch { emit(emptyList()) },
+        ) { projects, tasks ->
             val openByProject = tasks
                 .filter { it.status == TaskStatus.OPEN && it.projectId != null }
                 .groupingBy { it.projectId!! }
@@ -125,10 +130,17 @@ class TasksViewModel(
         .atStartOfDayIn(TimeZone.UTC)
 
     private val titleFlow: kotlinx.coroutines.flow.Flow<String?> = when (filter) {
+        // T-024: the title join is display-only — a failing projects/areas
+        // read (e.g. missing project.read, Aug 27 incident) must degrade the
+        // filter title to null, never collapse the task list itself.
         is TaskFilter.ByProject ->
-            organizationRepository.observeProject(filter.projectId).map { it?.name }
+            organizationRepository.observeProject(filter.projectId)
+                .map { it?.name }
+                .catch { emit(null) }
         is TaskFilter.ByArea ->
-            organizationRepository.observeArea(filter.areaId).map { it?.name }
+            organizationRepository.observeArea(filter.areaId)
+                .map { it?.name }
+                .catch { emit(null) }
         else -> flowOf(null)
     }
 
@@ -540,12 +552,17 @@ class ItemDetailViewModel(
             ) { task, projects -> taskUi(task, projects) }
                 .catch { e -> emit(ItemUiState(found = false, title = e.userMessage())) }
         } else {
+            // T-024: unknown-kind fallback — each probe degrades
+            // independently (null / empty) so one failing source (403,
+            // offline, 5xx) never collapses the whole screen.
             combine(
-                taskRepository.observeTask(itemId),
-                noteRepository.observeNote(itemId),
-                agentRepository.observeRun(itemId),
-                inboxRepository.observeInbox().map { list -> list.firstOrNull { it.id == itemId } },
-                organizationRepository.observeProjects(),
+                taskRepository.observeTask(itemId).catch { emit(null) },
+                noteRepository.observeNote(itemId).catch { emit(null) },
+                agentRepository.observeRun(itemId).catch { emit(null) },
+                inboxRepository.observeInbox()
+                    .map { list -> list.firstOrNull { it.id == itemId } }
+                    .catch { emit(null) },
+                organizationRepository.observeProjects().catch { emit(emptyList()) },
             ) { task, note, run, inboxItem, projects ->
                 when {
                     task != null -> taskUi(task, projects)

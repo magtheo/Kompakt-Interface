@@ -1,5 +1,6 @@
 package dev.magnor.kompakt.data.remote
 
+import dev.magnor.kompakt.domain.ForbiddenException
 import dev.magnor.kompakt.domain.OfflineException
 import dev.magnor.kompakt.domain.ProtocolNegotiation
 import dev.magnor.kompakt.domain.ProtocolVerdict
@@ -14,6 +15,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -72,6 +74,29 @@ class RemoteContractTest {
         val req = server.takeRequest()
         assertEquals("/v1/capabilities", req.path)
         assertEquals("Bearer test-token", req.getHeader("Authorization"))
+    }
+
+    @Test
+    fun `capabilities decode the V-069 device grant block`() = runTest {
+        // What /v1/capabilities now serves a device principal: the global
+        // contract plus the caller's own granted set. Absent granted
+        // (admin / pre-V-069 server) decodes to null — pinned by the
+        // negotiation test above relying on the default.
+        enqueueJson(
+            """
+            {"server_protocol":1,"minimum_client_protocol":1,
+             "features":{"today":true,"chat":true,"agents":true,"projects":true,
+                         "areas":true,"tasks":true,"notes":true,"inbox":true,
+                         "offline_capture":true},
+             "granted":{"device_id":"pixel-4a-5g",
+                        "capabilities":["project.read","task.read","note.read","inbox.read"]}}
+            """.trimIndent(),
+        )
+        val caps = RemoteSyncRepository(api).capabilities()
+        assertEquals("pixel-4a-5g", caps.granted?.deviceId)
+        assertTrue("granted cap passes", caps.grants("note.read"))
+        assertTrue("granted cap passes", caps.grants("project.read"))
+        assertFalse("missing cap fails", caps.grants("chat.read"))
     }
 
     @Test
@@ -179,6 +204,37 @@ class RemoteContractTest {
             thrown = e
         }
         assertTrue(thrown is UnauthorizedException)
+    }
+
+    @Test
+    fun `403 with capability detail maps to ForbiddenException naming the grant`() = runTest {
+        // require_capability shape (src/auth.py): the exact Aug-27 body.
+        server.enqueue(
+            MockResponse().setResponseCode(403)
+                .setBody("""{"detail":"capability 'project.read' required"}"""),
+        )
+        var thrown: Exception? = null
+        try {
+            RemoteTaskRepository(api).getTask("t1")
+        } catch (e: Exception) {
+            thrown = e
+        }
+        assertTrue(thrown is ForbiddenException)
+        assertEquals("project.read", (thrown as ForbiddenException).capability)
+    }
+
+    @Test
+    fun `403 with other detail keeps capability null`() = runTest {
+        // Not a require_capability 403 — must not guess a grant name.
+        server.enqueue(MockResponse().setResponseCode(403).setBody("""{"detail":"nope"}"""))
+        var thrown: Exception? = null
+        try {
+            RemoteTaskRepository(api).getTask("t1")
+        } catch (e: Exception) {
+            thrown = e
+        }
+        assertTrue(thrown is ForbiddenException)
+        assertNull((thrown as ForbiddenException).capability)
     }
 
     @Test

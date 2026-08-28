@@ -4,15 +4,21 @@ import dev.magnor.kompakt.data.fake.FakeChangeLog
 import dev.magnor.kompakt.data.fake.FakeOrganizationRepository
 import dev.magnor.kompakt.data.fake.FakeStore
 import dev.magnor.kompakt.data.fake.FakeTaskRepository
+import dev.magnor.kompakt.data.repository.OrganizationRepository
+import dev.magnor.kompakt.data.repository.TaskRepository
+import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.Project
 import dev.magnor.kompakt.domain.ProjectStatus
+import dev.magnor.kompakt.domain.RepositoryException
 import dev.magnor.kompakt.domain.Task
 import dev.magnor.kompakt.domain.TaskFilter
 import dev.magnor.kompakt.domain.TaskStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -180,6 +186,75 @@ class TasksViewModelTest {
             val byId = state.rows.associateBy { it.project.id }
             assertEquals(2, byId["project_kv"]?.openTasks) // completed t3 not counted
             assertEquals(0, byId["project_empty"]?.openTasks)
+        } finally {
+            coroutineContext.cancelChildren()
+            job.cancel()
+        }
+    }
+
+    // ── T-024: display-join degrade ─────────────────────────────────────
+
+    /** Org repo whose projects reads 403 — the Aug-27 incident shape. */
+    private class FailingProjectsOrg(inner: OrganizationRepository) : OrganizationRepository by inner {
+        override fun observeProjects(): Flow<List<Project>> =
+            flow { throw RepositoryException("capability 'project.read' required") }
+
+        override fun observeProject(id: EntityId): Flow<Project?> =
+            flow { throw RepositoryException("capability 'project.read' required") }
+    }
+
+    /** Task repo whose list flow 403s (task.read missing). */
+    private class FailingTasksRepo(inner: TaskRepository) : TaskRepository by inner {
+        override fun observeTasks(filter: TaskFilter): Flow<List<Task>> =
+            flow { throw RepositoryException("capability 'task.read' required") }
+    }
+
+    @Test
+    fun `project filter degrades its title when the projects join 403s`() = runTest(UnconfinedTestDispatcher()) {
+        build(
+            listOf(
+                Task(
+                    id = "t_kv_open", title = "KodeVerket open", status = TaskStatus.OPEN,
+                    dueAt = Instant.parse("2026-08-23T09:00:00Z"),
+                    projectId = "project_kv", updatedAt = now,
+                ),
+            ),
+            listOf(Project(id = "project_kv", name = "KodeVerket", status = ProjectStatus.ACTIVE, updatedAt = now)),
+        )
+        val vm = TasksViewModel(taskRepo, FailingProjectsOrg(orgRepo), now, TaskFilter.ByProject("project_kv"))
+        val job = launch { vm.state.collect {} }
+        try {
+            val state = vm.state.value
+            assertTrue("task list itself still loads", state.loaded)
+            assertEquals("filter title degrades to null", null, state.filterTitle)
+            // Title==null renders the grouped layout; the repo-level filter
+            // still scopes the set, so the task must appear — just bucketed.
+            assertEquals(
+                "task survives in the grouped layout",
+                listOf("t_kv_open"),
+                state.today.map { it.id } + state.upcoming.map { it.id },
+            )
+        } finally {
+            coroutineContext.cancelChildren()
+            job.cancel()
+        }
+    }
+
+    @Test
+    fun `projects list degrades open counts when the tasks join 403s`() = runTest(UnconfinedTestDispatcher()) {
+        build(
+            listOf(
+                Task(id = "t1", title = "a", status = TaskStatus.OPEN, projectId = "project_kv", updatedAt = now),
+            ),
+            listOf(Project(id = "project_kv", name = "KodeVerket", status = ProjectStatus.ACTIVE, updatedAt = now)),
+        )
+        val vm = ProjectsViewModel(orgRepo, FailingTasksRepo(taskRepo))
+        val job = launch { vm.state.collect {} }
+        try {
+            val state = vm.state.value
+            assertTrue("projects themselves still load", state.loaded)
+            assertEquals(listOf("project_kv"), state.rows.map { it.project.id })
+            assertEquals("open counts degrade to zero, not an error screen", 0, state.rows.first().openTasks)
         } finally {
             coroutineContext.cancelChildren()
             job.cancel()
