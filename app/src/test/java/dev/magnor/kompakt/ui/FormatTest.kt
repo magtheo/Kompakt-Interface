@@ -57,6 +57,8 @@ class FormatTest {
         assertEquals("in 45m", Instant.parse("2026-08-28T12:45:00Z").untilLabel(now, TimeZone.UTC))
         assertEquals("in 3h", Instant.parse("2026-08-28T15:00:00Z").untilLabel(now, TimeZone.UTC))
         assertEquals("tomorrow 09:00", Instant.parse("2026-08-29T09:00:00Z").untilLabel(now, TimeZone.UTC))
-        assertEquals("2026-09-02", Instant.parse("2026-09-02T09:00:00Z").untilLabel(now, TimeZone.UTC))
+        // T-030: far bucket is human weekday-first, never ISO. 2026-09-02 = Wed; Sun pins the weekday map edge.
+        assertEquals("Wed 2 Sep", Instant.parse("2026-09-02T09:00:00Z").untilLabel(now, TimeZone.UTC))
+        assertEquals("Sun 30 Aug", Instant.parse("2026-08-30T09:00:00Z").untilLabel(now, TimeZone.UTC))
     }
 }

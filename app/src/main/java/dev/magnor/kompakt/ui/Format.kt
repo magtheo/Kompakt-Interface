@@ -48,9 +48,20 @@ fun Instant.untilLabel(now: Instant, zone: TimeZone = TimeZone.currentSystemDefa
         days == 0L && seconds < 3_600 -> "in ${seconds / 60}m"
         days == 0L -> "in ${seconds / 3_600}h"
         days == 1L -> "tomorrow %02d:%02d".format(local.hour, local.minute)
-        else -> local.date.toString()
+        else -> local.date.humanShort()
     }
 }
+
+/**
+ * Fixed-English short date, weekday-first — "Wed 2 Sep". Same convention as
+ * the fixed-English Today title; kotlinx has no locale names, so hand-rolled.
+ * (T-030: untilLabel's far bucket previously leaked ISO "2026-09-02".)
+ */
+private val MONTHS_SHORT = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+private val WEEKDAYS_SHORT = arrayOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun") // kotlinx DayOfWeek.ordinal: Mon=0
+
+fun LocalDate.humanShort(): String =
+    "${WEEKDAYS_SHORT[dayOfWeek.ordinal]} $dayOfMonth ${MONTHS_SHORT[monthNumber - 1]}"
 
 /** Due-date bucket label: Today / Tomorrow / Overdue / date. */
 fun Instant.dayLabel(now: Instant): String {
