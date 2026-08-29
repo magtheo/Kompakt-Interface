@@ -2,7 +2,6 @@ package dev.magnor.kompakt.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,9 +9,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.domain.EntityKind
@@ -141,7 +139,6 @@ private fun TodayTabRow(
         Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         TodayTabLabel("NOW", selected == 0) { onSelect(0) }
         TodayTabLabel(label("TASKS", openCount), selected == 1) { onSelect(1) }
@@ -154,16 +151,23 @@ private fun label(base: String, count: Int) = if (count > 0) "$base $count" else
 @Composable
 private fun RowScope.TodayTabLabel(text: String, selected: Boolean, onClick: () -> Unit) {
     Column(
-        // T-027: hug the text — without IntrinsicSize.Min the fillMaxWidth() underline
-        // below makes the FIRST Row child consume the whole row, starving the other
-        // tabs to zero width (only "NOW" ever visible — found in on-device smoke).
+        // T-029: equal thirds — weight(1f) spreads the rail evenly and gives each label
+        // its full slot width so the inline count never wraps. Supersedes T-027's
+        // IntrinsicSize.Min hugging: intrinsic-min width is the widest WORD, so
+        // "ATTENTION 1" wrapped the count onto a second row, and unweighted labels
+        // packed to the left instead of distributing (on-device report Aug 29).
+        // (weight also fixes T-027's starvation — the underline Box(fillMaxWidth())
+        // is safe inside a weighted child: the slot is fixed at one third.)
         Modifier
-            .width(IntrinsicSize.Min)
+            .weight(1f)
             .clickable(onClick = onClick)
             .padding(horizontal = 2.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        TextMMD(text = text, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        // 13sp: "ATTENTION n" overflows a 1/3 slot at default size and wraps the
+        // count to a second row (on-device Aug 29) — MMD stays legible small (12sp
+        // precedent in NoteEditor meta).
+        TextMMD(text = text, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
         // Rule underline — solid when selected, invisible otherwise; static ink.
         Box(
             Modifier
