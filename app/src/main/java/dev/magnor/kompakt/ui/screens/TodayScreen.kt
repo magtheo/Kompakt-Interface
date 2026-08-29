@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -140,7 +142,11 @@ private fun label(base: String, count: Int) = if (count > 0) "$base $count" else
 @Composable
 private fun RowScope.TodayTabLabel(text: String, selected: Boolean, onClick: () -> Unit) {
     Column(
+        // T-027: hug the text — without IntrinsicSize.Min the fillMaxWidth() underline
+        // below makes the FIRST Row child consume the whole row, starving the other
+        // tabs to zero width (only "NOW" ever visible — found in on-device smoke).
         Modifier
+            .width(IntrinsicSize.Min)
             .clickable(onClick = onClick)
             .padding(horizontal = 2.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
