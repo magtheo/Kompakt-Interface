@@ -8,6 +8,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import dev.magnor.kompakt.ui.LocalAppContainer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mudita.mmd.components.buttons.ButtonMMD
@@ -197,6 +198,13 @@ fun SettingsScreen(
     val ui by viewModel.ui.collectAsState()
     val enrollment by viewModel.enrollmentState.collectAsState()
 
+    // T-031: the enrollment state's capability list is restore-time empty
+    // (EnrollmentManager line ~152) and rendered as a lying "reads". The
+    // CapabilityStore (GET /v1/capabilities granted block, V-069) is the
+    // single source of truth for §9 gating — render its grants here.
+    val appContainer = LocalAppContainer.current
+    val liveCaps by appContainer.capabilityStore.capabilities.collectAsState()
+
     AppScreen(title = "Settings", onBack = onBack) {
         SectionLabel("Device")
         when (val e = enrollment) {
@@ -253,7 +261,10 @@ fun SettingsScreen(
                 ListRow(title = "Status", subtitle = "Active — live data")
                 ListRow(title = "Device", subtitle = e.name)
                 ListRow(title = "Server", subtitle = e.baseUrl)
-                ListRow(title = "Capabilities", subtitle = e.capabilities.joinToString(", ").ifEmpty { "reads" })
+                // Live grants (V-069); fall back to enrollment-time list on
+                // demo/old servers where granted is null.
+                val grants = liveCaps.granted?.capabilities ?: e.capabilities
+                ListRow(title = "Capabilities", subtitle = grants.joinToString(", ").ifEmpty { "reads" })
                 OutlinedButtonMMD(
                     onClick = viewModel::forget,
                     modifier = Modifier
