@@ -2,16 +2,18 @@ package dev.magnor.kompakt.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Notifications
@@ -26,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.domain.EntityKind
@@ -71,6 +74,7 @@ fun TodayScreen(
 
     AppScreen(
         title = viewModel.now.titleToday(),
+        scrollable = false,
         actions = {
             // D030 entry, icon-only — minimal footprint next to the bell.
             IconButton(onClick = onOpenCalendar) {
@@ -95,11 +99,19 @@ fun TodayScreen(
                     attentionCount = state.attentionCount,
                     onSelect = { page -> scope.launch { pagerState.scrollToPage(page) } },
                 )
+                // T-028: pager pages own their vertical scroll — the pager fills the
+                // viewport, so AppScreen's scroll never has range and pages clip overflow.
                 HorizontalPager(state = pagerState) { page ->
-                    when (page) {
-                        0 -> NowPage(state, viewModel.now)
-                        1 -> TasksPage(state, onComplete = viewModel::completeTask)
-                        else -> AttentionPage(state, onOpenAttention, onOpenInbox)
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        when (page) {
+                            0 -> NowPage(state, viewModel.now)
+                            1 -> TasksPage(state, onComplete = viewModel::completeTask)
+                            else -> AttentionPage(state, onOpenAttention, onOpenInbox)
+                        }
                     }
                 }
             }
@@ -127,7 +139,6 @@ private fun TodayTabRow(
         Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         TodayTabLabel("NOW", selected == 0) { onSelect(0) }
         TodayTabLabel(label("TASKS", openCount), selected == 1) { onSelect(1) }
@@ -140,12 +151,23 @@ private fun label(base: String, count: Int) = if (count > 0) "$base $count" else
 @Composable
 private fun RowScope.TodayTabLabel(text: String, selected: Boolean, onClick: () -> Unit) {
     Column(
+        // T-029: equal thirds — weight(1f) spreads the rail evenly and gives each label
+        // its full slot width so the inline count never wraps. Supersedes T-027's
+        // IntrinsicSize.Min hugging: intrinsic-min width is the widest WORD, so
+        // "ATTENTION 1" wrapped the count onto a second row, and unweighted labels
+        // packed to the left instead of distributing (on-device report Aug 29).
+        // (weight also fixes T-027's starvation — the underline Box(fillMaxWidth())
+        // is safe inside a weighted child: the slot is fixed at one third.)
         Modifier
+            .weight(1f)
             .clickable(onClick = onClick)
             .padding(horizontal = 2.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        TextMMD(text = text, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        // 13sp: "ATTENTION n" overflows a 1/3 slot at default size and wraps the
+        // count to a second row (on-device Aug 29) — MMD stays legible small (12sp
+        // precedent in NoteEditor meta).
+        TextMMD(text = text, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
         // Rule underline — solid when selected, invisible otherwise; static ink.
         Box(
             Modifier

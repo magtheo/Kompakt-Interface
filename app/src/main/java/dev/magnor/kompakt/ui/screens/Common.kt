@@ -35,6 +35,7 @@ import com.mudita.mmd.components.top_app_bar.TopAppBarMMD
 fun AppScreen(
     title: String,
     onBack: (() -> Unit)? = null,
+    scrollable: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {},
     content: @Composable () -> Unit,
 ) {
@@ -54,7 +55,12 @@ fun AppScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .then(
+                    // T-028: screens hosting a viewport-filling lazy layout (Today's
+                    // pager) must opt out — a scrollable parent hands it unbounded
+                    // height and any scrollable page child crashes on measure.
+                    if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier
+                )
                 .padding(16.dp),
         ) {
             content()
