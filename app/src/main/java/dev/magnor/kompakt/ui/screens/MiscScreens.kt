@@ -8,6 +8,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import dev.magnor.kompakt.ui.LocalAppContainer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -297,7 +299,14 @@ fun SettingsScreen(
 
         SectionLabel("About")
         ListRow(title = "Diagnostics", onClick = onOpenDiagnostics)
-        ListRow(title = "Version", subtitle = "0.3.0-dev (Phase 4 — enrollment)")
+        // T-032: version is mechanical (PackageManager), never a hardcoded
+        // string — "0.3.0-dev (Phase 4)" had drifted from gradle's 0.1.0-dev.
+        val ctx = LocalContext.current
+        val versionName = remember(ctx) {
+            runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }
+                .getOrNull() ?: "?"
+        }
+        ListRow(title = "Version", subtitle = "v$versionName")
         ListRow(title = "Data", subtitle = "Fakes until enrolled, then live /v1/")
     }
 }
