@@ -23,7 +23,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +58,9 @@ fun TodayScreen(
     onOpenCalendar: () -> Unit = {},
     onOpenAttention: (InboxItem) -> Unit = {},
     showInboxAction: Boolean = true,
+    /** T-033: fresh-install nudge — true while unenrolled (fake mode). */
+    notEnrolled: Boolean = false,
+    onOpenSettings: () -> Unit = {},
     viewModel: TodayViewModel = containerViewModel {
         TodayViewModel(
             it.todayRepository,
@@ -71,6 +76,9 @@ fun TodayScreen(
     val projection = state.projection
     val pagerState = rememberPagerState(initialPage = 0) { 3 }
     val scope = rememberCoroutineScope()
+    // T-033: dismissal survives rotation (saveable) but not app restart —
+    // an unenrolled device gets re-nudged next launch, by design.
+    val nudgeDismissed = rememberSaveable { mutableStateOf(false) }
 
     AppScreen(
         title = viewModel.now.titleToday(),
@@ -87,6 +95,39 @@ fun TodayScreen(
             }
         },
     ) {
+        // T-033: fake mode reads as real data on a fresh install — one honest
+        // banner with a direct path to enrollment, dismissable for the session.
+        if (notEnrolled && !nudgeDismissed.value) {
+            CardMMD(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        TextMMD(text = "Demo — not connected", fontWeight = FontWeight.Bold)
+                        TextMMD(
+                            text = "Sample data until this device is enrolled.",
+                            fontSize = 13.sp,
+                        )
+                    }
+                    TextMMD(
+                        text = "Enroll →",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable(onClick = onOpenSettings)
+                            .padding(8.dp),
+                    )
+                    TextMMD(
+                        text = "✕",
+                        modifier = Modifier
+                            .clickable { nudgeDismissed.value = true }
+                            .padding(8.dp),
+                    )
+                }
+            }
+        }
         when {
             // Static error line — E-Ink rule: no spinners, reopening refetches.
             projection == null && state.error != null ->

@@ -113,7 +113,9 @@ sealed interface ServerMode {
     /** In-memory demo data (Phase 2 fakes). */
     data object Fake : ServerMode
 
-    /** Live coordinator: base URL (e.g. http://dev-server.example.ts.net:8650) + bearer token. */
+    /** Live coordinator: base URL (e.g. https://dev-server.example.ts.net:8650 — tailscale
+     *  serve terminates TLS, so the scheme must be https; cleartext is blocked by network
+     *  security policy and fails with CLEARTEXT at enrollment) + bearer token. */
     data class Remote(val baseUrl: String, val token: String) : ServerMode
 }
 

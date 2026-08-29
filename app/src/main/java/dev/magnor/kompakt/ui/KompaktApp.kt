@@ -25,6 +25,7 @@ import com.mudita.mmd.components.nav_bar.NavigationBarMMD
 import com.mudita.mmd.components.nav_bar.NavigationBarItemMMD
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.data.AppContainer
+import dev.magnor.kompakt.data.EnrollmentManager
 import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.SurfaceGating
 import dev.magnor.kompakt.domain.TaskFilter
@@ -80,6 +81,9 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
     val navController = rememberNavController()
     val appContainer = LocalAppContainer.current
     val caps by appContainer.capabilityStore.capabilities.collectAsState()
+    // T-033: shell derives "fake mode live" from enrollment state (the
+    // CapabilityStore alone can't distinguish demo from offline-enrolled).
+    val enrollmentState by appContainer.enrollment.state.collectAsState()
     val surfaces = remember(caps) { SurfaceGating.evaluate(caps) }
 
     // T-019: one-shot external route (notification tap) — navigate once,
@@ -158,6 +162,9 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
                         navController.navigate(Routes.fromInboxItem(item))
                     },
                     showInboxAction = surfaces.inboxEntry,
+                    // T-033: nudge banner while fake mode is live.
+                    notEnrolled = enrollmentState is EnrollmentManager.State.NotEnrolled,
+                    onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 )
             }
             composable(Routes.CHAT_LIST) {
