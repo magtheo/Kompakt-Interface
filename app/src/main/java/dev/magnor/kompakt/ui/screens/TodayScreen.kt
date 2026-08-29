@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -14,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Notifications
@@ -73,6 +76,7 @@ fun TodayScreen(
 
     AppScreen(
         title = viewModel.now.titleToday(),
+        scrollable = false,
         actions = {
             // D030 entry, icon-only — minimal footprint next to the bell.
             IconButton(onClick = onOpenCalendar) {
@@ -97,11 +101,19 @@ fun TodayScreen(
                     attentionCount = state.attentionCount,
                     onSelect = { page -> scope.launch { pagerState.scrollToPage(page) } },
                 )
+                // T-028: pager pages own their vertical scroll — the pager fills the
+                // viewport, so AppScreen's scroll never has range and pages clip overflow.
                 HorizontalPager(state = pagerState) { page ->
-                    when (page) {
-                        0 -> NowPage(state, viewModel.now)
-                        1 -> TasksPage(state, onComplete = viewModel::completeTask)
-                        else -> AttentionPage(state, onOpenAttention, onOpenInbox)
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        when (page) {
+                            0 -> NowPage(state, viewModel.now)
+                            1 -> TasksPage(state, onComplete = viewModel::completeTask)
+                            else -> AttentionPage(state, onOpenAttention, onOpenInbox)
+                        }
                     }
                 }
             }
