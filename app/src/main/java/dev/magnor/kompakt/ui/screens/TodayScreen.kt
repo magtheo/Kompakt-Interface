@@ -1,5 +1,6 @@
 package dev.magnor.kompakt.ui.screens
 
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -142,7 +144,16 @@ fun TodayScreen(
                 )
                 // T-028: pager pages own their vertical scroll — the pager fills the
                 // viewport, so AppScreen's scroll never has range and pages clip overflow.
-                HorizontalPager(state = pagerState) { page ->
+                // T-036: snap() settle — after a swipe release the page jumps instantly
+                // to its target instead of spring-animating there (E-Ink rule: no
+                // animated navigation; the settle was the one remaining animation).
+                HorizontalPager(
+                    state = pagerState,
+                    flingBehavior = PagerDefaults.flingBehavior(
+                        state = pagerState,
+                        snapAnimationSpec = snap(),
+                    ),
+                ) { page ->
                     Column(
                         Modifier
                             .fillMaxSize()
