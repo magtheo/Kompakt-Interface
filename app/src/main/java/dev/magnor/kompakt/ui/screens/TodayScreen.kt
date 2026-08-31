@@ -1,8 +1,8 @@
 package dev.magnor.kompakt.ui.screens
 
-import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -30,6 +29,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,6 +43,7 @@ import dev.magnor.kompakt.ui.timeOfDay
 import dev.magnor.kompakt.ui.untilLabel
 import dev.magnor.kompakt.ui.viewmodels.TodayViewModel
 import dev.magnor.kompakt.ui.viewmodels.TodayViewModel.TodayUiState
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -144,16 +146,46 @@ fun TodayScreen(
                 )
                 // T-028: pager pages own their vertical scroll — the pager fills the
                 // viewport, so AppScreen's scroll never has range and pages clip overflow.
-                // T-036: snap() settle — after a swipe release the page jumps instantly
-                // to its target instead of spring-animating there (E-Ink rule: no
-                // animated navigation; the settle was the one remaining animation).
-                HorizontalPager(
-                    state = pagerState,
-                    flingBehavior = PagerDefaults.flingBehavior(
+                //
+                // T-037: NO drag-follow. Even with T-036's snap() settle, the pager
+                // rendered continuously while the finger moved — on e-ink every
+                // millimeter of drag is a partial redraw that smears ("slow and
+                // sluggish"). userScrollEnabled=false disables the visual drag; the
+                // wrapper's horizontal-gesture detector commits ONE instant
+                // scrollToPage the moment the swipe crosses 60dp — a hard page cut
+                // with zero intermediate frames. Vertical drags never trigger the
+                // horizontal detector, so per-page scroll (T-028) is untouched.
+                val swipeThreshold = with(LocalDensity.current) { 60.dp.toPx() }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(pagerState) {
+                            var accumulated = 0f
+                            var fired = false
+                            detectHorizontalDragGestures(
+                                onDragStart = {
+                                    accumulated = 0f
+                                    fired = false
+                                },
+                            ) { change, dragAmount ->
+                                change.consume()
+                                if (fired) return@detectHorizontalDragGestures
+                                accumulated += dragAmount
+                                if (abs(accumulated) >= swipeThreshold) {
+                                    fired = true
+                                    val target = (pagerState.currentPage + if (accumulated < 0) 1 else -1)
+                                        .coerceIn(0, 2)
+                                    if (target != pagerState.currentPage) {
+                                        scope.launch { pagerState.scrollToPage(target) }
+                                    }
+                                }
+                            }
+                        },
+                ) {
+                    HorizontalPager(
                         state = pagerState,
-                        snapAnimationSpec = snap(),
-                    ),
-                ) { page ->
+                        userScrollEnabled = false,
+                    ) { page ->
                     Column(
                         Modifier
                             .fillMaxSize()
@@ -164,6 +196,7 @@ fun TodayScreen(
                             1 -> TasksPage(state, onComplete = viewModel::completeTask)
                             else -> AttentionPage(state, onOpenAttention, onOpenInbox)
                         }
+                    }
                     }
                 }
             }
