@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recents_key_service_label">Recents key</string>
+    <string name="recents_key_service_description">Hold Volume Up to open the recent-apps list. Short presses keep working as volume. Adds the missing recents affordance on the Mudita Kompakt.</string>
+</resources>
