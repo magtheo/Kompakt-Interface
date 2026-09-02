@@ -77,6 +77,20 @@
                 android:resource="@xml/recents_key_service_config" />
         </service>
 
+        <!-- T-043: system-notification read access (inkOS renders none).
+             Listener binding is granted via ADB (`cmd notification
+             allow_listener dev.magnor.kompakt/.notifications.NotificationListener`)
+             or Settings → Special access → Notification access. -->
+        <service
+            android:name=".notifications.NotificationListener"
+            android:label="Notification reader"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <!-- T-020: AlarmManager reminder delivery (protocol §5). -->
         <receiver
             android:name=".notifications.ReminderReceiver"

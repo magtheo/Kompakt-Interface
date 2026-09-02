@@ -34,6 +34,7 @@ import dev.magnor.kompakt.ui.navigation.TopLevelDestination
 import dev.magnor.kompakt.ui.screens.AgentDetailScreen
 import dev.magnor.kompakt.ui.screens.AgentRunDetailScreen
 import dev.magnor.kompakt.ui.screens.AgentsListScreen
+import dev.magnor.kompakt.ui.screens.AppSwitcherScreen
 import dev.magnor.kompakt.ui.screens.AreasScreen
 import dev.magnor.kompakt.ui.screens.CalendarScreen
 import dev.magnor.kompakt.ui.screens.CaptureScreen
@@ -46,6 +47,7 @@ import dev.magnor.kompakt.ui.screens.InboxScreen
 import dev.magnor.kompakt.ui.screens.ItemDetailScreen
 import dev.magnor.kompakt.ui.screens.MoreScreen
 import dev.magnor.kompakt.ui.screens.NoteEditorScreen
+import dev.magnor.kompakt.ui.screens.NotificationsScreen
 import dev.magnor.kompakt.ui.screens.NotesScreen
 import dev.magnor.kompakt.ui.screens.OrganizeScreen
 import dev.magnor.kompakt.ui.screens.ProjectDetailScreen
@@ -395,6 +397,12 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
             }
             composable(Routes.DIAGNOSTICS) {
                 DiagnosticsScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Routes.NOTIFICATIONS) {
+                NotificationsScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Routes.APP_SWITCHER) {
+                AppSwitcherScreen(onBack = { navController.popBackStack() })
             }
         }
     }

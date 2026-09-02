@@ -41,12 +41,17 @@ object Routes {
     const val SETTINGS = "settings"
     const val DIAGNOSTICS = "diagnostics"
 
-    /** All screen patterns — exactly one entry per screen (22). */
+    /** T-043: device-local quick surfaces (hold-HOME / hold-settings-key). */
+    const val NOTIFICATIONS = "notifications"
+    const val APP_SWITCHER = "switcher"
+
+    /** All screen patterns — exactly one entry per screen (24). */
     val all: List<String> = listOf(
         TODAY, CHAT_LIST, CHAT_THREAD, AGENTS_LIST, AGENT_DETAIL,
         AGENT_RUN_DETAIL, MORE, ORGANIZE, PROJECTS, PROJECT_DETAIL, AREAS,
         TASKS_PATTERN, NOTES, NOTE_EDITOR, INBOX, ITEM_DETAIL, CAPTURE,
         CALENDAR, EVENT_DETAIL, EVENT_EDITOR, SETTINGS, DIAGNOSTICS,
+        NOTIFICATIONS, APP_SWITCHER,
     )
 
     fun chatThread(id: String) = "chat/$id"
