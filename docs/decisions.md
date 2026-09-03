@@ -782,6 +782,82 @@ This supersedes the vault ground rule "One VPN substrate: Tailscale / no
 WireGuard app" (2026-08-31) for this device — that rule predates the battery
 findings. For all *other* devices the rule stands.
 
+## D033 — Hermes joins the agents panel as a third backend: trusted lane, adapter-minted identity
+
+The phone's agents panel gains the Hermes agent (the same brain that
+runs the chat surface) — not by teaching the app a new protocol, but by
+adding a third `AgentBackend` adapter inside vault-coordinator (D025:
+general at the /v1 boundary, specific inside adapters). Zero app
+changes, zero protocol changes, zero new credentials.
+
+Two decisions inside it:
+
+- **Trusted lane.** Warren runs sandboxed; OpenCode runs unsandboxed in
+  a chosen repo directory. Hermes runs on the whole home server with
+  its full toolset — the widest lane yet, surfaced honestly as
+  `sandboxed: false` so the UI can badge it. The trust boundary is the
+  dispatch act itself: the user typed the prompt on the phone.
+- **Adapter-minted identity.** Hermes's native run ids share the
+  `run_` prefix with Warren — passing them through would corrupt the
+  registry's prefix-based backend inference. The adapter therefore
+  mints `hms_<hex>` execution ids and passes them to Hermes as the
+  run's `session_id` (which also buys native multi-turn resume); the
+  internal `run_<hex>` per turn never crosses the boundary. The stable
+  id and the current-run mapping are persisted in `hermes_session_runs`
+  so watcher polls survive coordinator restarts.
+
+Wire honesty follows the port's rules: `live_steering: false` is
+genuinely none (no injection API and no spawn-fold queue), commands
+are empty, `message.delta` SSE frames are dropped by design (the e-ink
+phone never renders streaming text), and a run that vanished in a
+backend restart surfaces as FAILED — "run lost — backend restarted?" —
+so the V-057 watcher settles instead of polling forever.
+
+Implementation: vault-coordinator V-073 (`src/agents/adapters/hermes.py`,
+45 contract checks, suite 560 green).
+
+## D034 — The General chat tier runs the full Hermes agent: the phone's normal chat becomes the Telegram brain
+
+The normal (unscoped) chat tier stops being a thin LLM completion and
+routes through the Hermes agent itself — the same brain the user talks
+to on Telegram: persistent memory, full toolset, same persona. Not a
+lookalike; the actual agent, via the D033 adapter.
+
+Decisions inside it:
+
+- **One thread = one persistent session.** Each general chat thread
+  mints its own `hms_` session on first send and reuses it for every
+  later message (`chat_threads.agent_execution_id`, `hms_`-prefix
+  checked — the same column V-063 uses for OpenCode sessions; the
+  prefix disambiguates which backend owns it). The agent's transcript
+  lives in Hermes's session DB; the coordinator never replays stored
+  history into runs — it just sends the new message, and today's
+  session-resume fix does the rest. Same agent, separate conversation:
+  the phone thread does not see the Telegram transcript, and vice
+  versa.
+- **Scope tiers stay honest.** Topic threads keep their vault-seeded
+  quick-LLM character (a deliberately scoped lane); workspace threads
+  stay on OpenCode (repo-bound). Only the general tier upgrades. If
+  the agent backend is down or disabled, general chat falls back to
+  the old LLM lane — chat keeps working, never a dead screen.
+- **V-063's binding rule carries over.** Chat turns create NO
+  `agent_executions` rows; the watcher/alert loop never fires for
+  chat. Late replies (> `chat.agent_timeout_s`, default 100 s — under
+  the phone's 120 s IO timeout) get an honest "(agent still
+  working…)" note plus `pending_turn`, and are backfilled on thread
+  open or next send. Busy/failure degrade to honest notes; the user
+  message always stands.
+
+Zero APK changes: the send response contract is unchanged
+(`message` + `assistant_message` + optional `proposed_topic`); only
+who answers differs.
+
+Implementation: vault-coordinator V-074 (23 contract checks; suite
+583 green). Adapter gained two restart-survival fixes (send
+materializes from the persisted mapping after a coordinator restart;
+a lost run no longer kills the session — run lost ≠ session lost,
+the next send starts a fresh run in the same session).
+
 ## Deferred Decisions
 
 The following remain intentionally open:
