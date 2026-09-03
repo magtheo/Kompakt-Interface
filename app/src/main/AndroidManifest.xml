@@ -135,6 +135,20 @@
         <receiver
             android:name=".notifications.ReminderReceiver"
             android:exported="false" />
+        <!-- T-046 spike: day-timeline home widget. exported=false —
+             APPWIDGET_UPDATE arrives from the system; our own re-renders
+             go through AppWidgetManager directly, never a broadcast. -->
+        <receiver
+            android:name=".widget.DayWidgetProvider"
+            android:exported="false"
+            android:label="Day timeline">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/day_widget_info" />
+        </receiver>
     </application>
 
 </manifest>

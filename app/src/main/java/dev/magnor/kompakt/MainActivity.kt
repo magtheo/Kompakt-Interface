@@ -15,6 +15,7 @@ import dev.magnor.kompakt.notifications.AlertNotifications
 import dev.magnor.kompakt.sync.SyncWindowService
 import dev.magnor.kompakt.ui.KompaktApp
 import dev.magnor.kompakt.ui.theme.KompaktTheme
+import dev.magnor.kompakt.widget.DayWidgetProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
@@ -52,6 +53,9 @@ class MainActivity : ComponentActivity() {
     // = window closes. Plus the one-time VPN consent dialog.
     override fun onStart() {
         super.onStart()
+        // T-046 spike: app-open push proves the widget update path.
+        // Unconditional — independent of tunnel state.
+        runCatching { DayWidgetProvider.push(this) }
         val app = application as KompaktApplication
         if (!app.tunnelController.isConfigured) return
         // Consent ask BEFORE the remoteActiveFlow gate: after a crash

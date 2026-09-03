@@ -2,4 +2,5 @@
 <resources>
     <string name="recents_key_service_label">Recents key</string>
     <string name="recents_key_service_description">Hold Volume Up to open the recent-apps list. Short presses keep working as volume. Adds the missing recents affordance on the Mudita Kompakt.</string>
+    <string name="widget_day_description">Today’s agenda on the home screen (spike: stub rows — validates the widget host).</string>
 </resources>
