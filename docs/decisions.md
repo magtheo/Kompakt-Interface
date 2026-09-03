@@ -880,3 +880,29 @@ The following remain intentionally open:
 - final open-source license for the app repository.
 
 These should be resolved through implementation or real-device testing.
+
+## D035 — RecentsKeyService stays in the main process: Mudita's AMS cannot bind accessibility services in secondary processes
+
+Date: 2026-09-03 · Status: accepted · Supersedes: the `:keys` isolation half of T-045 (d2051a9)
+
+The T-045 fix shipped two defenses against the offline-crash blacklist: (1) transport
+degradation so the main process stops crashing offline, and (2) moving
+RecentsKeyService to `android:process=":keys"` so key handling survives main-process
+death. Defense (2) turned out to be a platform dead end: after the first `:keys` APK
+was installed (Sep 3 11:18), the AccessibilityManagerService on Mudita's Android 12
+fork never issued a single bindService — state sat in "Binding services" forever
+while the setting stayed "enabled". No `:keys` process ever spawned; settings
+off/on cycles, process kills, and reinstalls were no-ops. Removing the process
+attribute (main process again) re-bound immediately on the next re-set.
+
+Rule: the a11y service (and anything whose binding goes through a system manager)
+must live in the default process on this device. Crash isolation is provided by
+defense (1) — the degradation hardening — which addresses the actual Sep 2 incident
+class (offline exceptions killing the process). If a future crash class emerges, the
+answer is fixing the crash, not process isolation.
+
+Operational note (same session): agent-driven gradle builds must set
+`ANDROID_USER_HOME=/home/user/.android` — the Hermes terminal env carries
+`XDG_CONFIG_HOME=/home/user/.config`, which redirects debug signing to
+`~/.config/.android/debug.keystore` (freshly minted) and produces
+INSTALL_FAILED_UPDATE_INCOMPATIBLE against device builds.

@@ -100,11 +100,13 @@
         </receiver>
 
         <!-- T-042: no-root recents access on inkOS — Volume Up long-press
-             opens the SystemUI overview (GLOBAL_ACTION_RECENTS). -->
+             opens the SystemUI overview (GLOBAL_ACTION_RECENTS).
+             NOTE: do NOT add android:process here — Mudita's A12 fork fails
+             to BIND a11y services in secondary processes (T-045 regression,
+             Sep 3: bind silently no-ops, keys dead until revert). -->
         <service
             android:name=".recents.RecentsKeyService"
             android:label="@string/recents_key_service_label"
-            android:process=":keys"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
