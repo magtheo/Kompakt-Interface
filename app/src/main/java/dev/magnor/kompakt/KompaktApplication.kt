@@ -1,5 +1,6 @@
 package dev.magnor.kompakt
 
+import android.app.ActivityManager
 import android.app.Application
 import android.content.Intent
 import android.os.SystemClock
@@ -30,8 +31,22 @@ class KompaktApplication : Application() {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /**
+     * T-045: the a11y key service runs in its own process (:keys). The
+     * application shell — fallback sync worker, reminder planning,
+     * connectivity watcher, alert FGS — must boot exactly once, in the
+     * main process only.
+     */
+    private val isMainProcess: Boolean by lazy {
+        val manager = getSystemService(ActivityManager::class.java) ?: return@lazy true
+        val pid = android.os.Process.myPid()
+        manager.runningAppProcesses?.firstOrNull { it.pid == pid }
+            ?.processName == packageName
+    }
+
     override fun onCreate() {
         super.onCreate()
+        if (!isMainProcess) return
         // T-020 — protocol §4.2: periodic fallback sync whenever the live
         // SSE path is down (KEEP = enrollment flips never reset cadence).
         AlertSyncWorker.schedule(this)

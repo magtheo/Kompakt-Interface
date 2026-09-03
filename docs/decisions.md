@@ -750,6 +750,38 @@ views. No other mutation may be added to Today without a new decision.
 (D030 is reserved for the calendar surface decision recorded in
 `docs/plans/2026-08-25-t023-calendar.md`.)
 
+## D032 — The phone is not a mesh client: connectivity is windowed WireGuard to one endpoint, owned by the app
+
+The Kompakt leaves the Tailscale mesh. Measured cause (2026-09-02
+forensics): a full mesh client on a de-Googled phone has no FCM signaling
+channel, so Tailscale falls back to ~36 s keepalives — 99.8% of app AP-wakeups,
+modem awake 82% of on-battery time, ~6%/h drain. This is true regardless of
+control plane (SaaS or Headscale); it is a property of running the full client.
+
+Replacement: a plain WireGuard tunnel embedded in the Kompakt-Interface app
+(`com.wireguard.android:tunnel` library, own VpnService) with a single static
+peer — dev-server. Connectivity is **windowed and app-scheduled**: tunnel up →
+pull (ntfy, Radicale, coordinator API) → tunnel down, on a ~15 min cadence and
+on app-foreground. WireGuard itself is silent between windows; nothing dials
+in. AllowedIPs on the phone cover only the server's tunnel address — the
+phone never becomes a router for other traffic.
+
+Consequences:
+
+- The tailnet remains for laptops/admin nodes; dev-server bridges both
+  (mesh member + wg endpoint). SSH/ops to the phone from outside is
+  LAN-only; the phone is a spoke, never a destination.
+- The Tailscale app stays installed on the phone as a dormant fallback
+  (appops-restricted); it is not part of normal operation.
+- Notifications arrive batched at window boundaries; true emergencies ride
+  cellular SMS/calls, which are unaffected.
+- Sync state is cursors, not sessions: missed windows catch up on the next
+  one. The server treats the phone as an occasionally-connected client.
+
+This supersedes the vault ground rule "One VPN substrate: Tailscale / no
+WireGuard app" (2026-08-31) for this device — that rule predates the battery
+findings. For all *other* devices the rule stands.
+
 ## Deferred Decisions
 
 The following remain intentionally open:

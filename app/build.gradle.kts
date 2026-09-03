@@ -13,8 +13,8 @@ android {
         applicationId = "dev.magnor.kompakt"
         minSdk = 28
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.5.0-dev"
+        versionCode = 4
+        versionName = "0.5.1-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

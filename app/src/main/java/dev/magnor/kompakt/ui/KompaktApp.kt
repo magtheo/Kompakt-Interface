@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -14,6 +15,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -92,7 +96,9 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
     // then tell the source it's consumed so replays don't re-fire.
     LaunchedEffect(launchRoute) {
         launchRoute?.let {
-            navController.navigate(it)
+            // T-045: launchSingleTop — an external route can never stack a
+            // second copy of a screen that is already on top.
+            navController.navigate(it) { launchSingleTop = true }
             onRouteConsumed()
         }
     }
@@ -100,6 +106,21 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val isTopLevel = currentRoute in TopLevelDestination.routes
+
+    // T-045: quick surfaces are peeks — leaving the app dismisses them, so
+    // re-entering from the launcher/switcher never lands on a stale peek.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP &&
+                Routes.isTransientSurface(navController.currentDestination?.route)
+            ) {
+                navController.popBackStack(Routes.TODAY, inclusive = false)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val visibleTabs = TopLevelDestination.entries.filter { dest ->
         when (dest) {

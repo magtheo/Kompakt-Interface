@@ -45,6 +45,17 @@ object Routes {
     const val NOTIFICATIONS = "notifications"
     const val APP_SWITCHER = "switcher"
 
+    /**
+     * T-045: quick surfaces are transient peeks, not destinations — the
+     * app dismisses them when it backgrounds (ON_STOP pops back to the
+     * shell), and launchSingleTop keeps them from stacking, so re-entry
+     * from the launcher/switcher always lands on the main shell.
+     */
+    val transientSurfaces: Set<String> = setOf(NOTIFICATIONS, APP_SWITCHER)
+
+    fun isTransientSurface(route: String?): Boolean =
+        route != null && route in transientSurfaces
+
     /** All screen patterns — exactly one entry per screen (24). */
     val all: List<String> = listOf(
         TODAY, CHAT_LIST, CHAT_THREAD, AGENTS_LIST, AGENT_DETAIL,

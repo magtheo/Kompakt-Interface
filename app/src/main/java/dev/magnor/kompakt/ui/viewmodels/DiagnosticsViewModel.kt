@@ -8,6 +8,7 @@ import dev.magnor.kompakt.domain.ProtocolNegotiation
 import dev.magnor.kompakt.domain.ProtocolVerdict
 import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.ServerStatus
+import dev.magnor.kompakt.ui.userMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,6 +20,10 @@ import kotlinx.datetime.Instant
  * Diagnostics — capability negotiation, server status, change backlog.
  * Protocol rules (protocol §9): hard-stop with an explicit error when
  * client < minimum_client_protocol; disabled features stay hidden.
+ *
+ * T-045: offline is a normal state (tailnet-only server, T-044 windowed
+ * sync). Every probe degrades independently and the first transport
+ * failure wins the honest error line — never an uncaught exception.
  */
 class DiagnosticsViewModel(
     private val syncRepository: SyncRepository,
@@ -33,6 +38,7 @@ class DiagnosticsViewModel(
         val serverStatus: ServerStatus? = null,
         val pendingChanges: Int? = null,
         val lastSync: Instant? = null,
+        val error: String? = null,
     )
 
     private val _state = MutableStateFlow(DiagnosticsUiState())
@@ -49,17 +55,25 @@ class DiagnosticsViewModel(
 
     fun refresh() {
         viewModelScope.launch {
-            val caps = syncRepository.capabilities()
-            val status = syncRepository.status()
-            val page = syncRepository.changesSince(null)
+            var transportError: String? = null
+            fun noteFailure(e: Throwable) {
+                if (transportError == null) transportError = e.userMessage()
+            }
+            val caps = runCatching { syncRepository.capabilities() }
+                .onFailure(::noteFailure).getOrNull()
+            val status = runCatching { syncRepository.status() }
+                .onFailure(::noteFailure).getOrNull()
+            val page = runCatching { syncRepository.changesSince(null) }
+                .onFailure(::noteFailure).getOrNull()
             _state.update {
                 it.copy(
                     capabilities = caps,
-                    verdict = ProtocolNegotiation.evaluate(
-                        clientProtocol, minimumServerProtocol, caps,
-                    ),
+                    verdict = caps?.let { c ->
+                        ProtocolNegotiation.evaluate(clientProtocol, minimumServerProtocol, c)
+                    },
                     serverStatus = status,
-                    pendingChanges = page.changes.size,
+                    pendingChanges = page?.changes?.size,
+                    error = transportError,
                 )
             }
         }
@@ -67,7 +81,8 @@ class DiagnosticsViewModel(
 
     fun syncNow() {
         viewModelScope.launch {
-            syncRepository.markSynced(newRequestId())
+            runCatching { syncRepository.markSynced(newRequestId()) }
+                .onFailure { e -> _state.update { it.copy(error = e.userMessage()) } }
             refresh()
         }
     }

@@ -4,6 +4,7 @@ import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.InboxItem
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -16,6 +17,17 @@ class RoutesTest {
         //       + notifications, switcher (T-043).
         assertEquals(24, Routes.all.size)
         assertEquals(Routes.all.size, Routes.all.toSet().size)
+    }
+
+    @Test
+    fun quickSurfacesAreTransientAndNothingElseIs() {
+        // T-045: exactly the two quick surfaces are transient.
+        assertTrue(Routes.isTransientSurface(Routes.NOTIFICATIONS))
+        assertTrue(Routes.isTransientSurface(Routes.APP_SWITCHER))
+        Routes.all.filter { it !in Routes.transientSurfaces }.forEach {
+            assertFalse("route $it must not be transient", Routes.isTransientSurface(it))
+        }
+        assertFalse(Routes.isTransientSurface(null))
     }
 
     @Test

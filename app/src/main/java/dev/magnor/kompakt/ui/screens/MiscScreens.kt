@@ -145,6 +145,9 @@ fun DiagnosticsScreen(
     val state by viewModel.state.collectAsState()
 
     AppScreen(title = "Diagnostics", onBack = onBack) {
+        // T-045: honest transport-failure line (static text — e-ink rule).
+        state.error?.let { ListRow(title = it) }
+
         SectionLabel("Protocol")
         state.verdict?.let { verdict ->
             val (label, value) = when (verdict) {
