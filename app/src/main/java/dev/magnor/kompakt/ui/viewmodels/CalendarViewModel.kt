@@ -75,8 +75,14 @@ class CalendarViewModel(
 
     init {
         viewModelScope.launch {
-            calendarRepository.observeCalendars().collect { list ->
-                _state.update { it.copy(calendars = list) }
+            try {
+                calendarRepository.observeCalendars().collect { list ->
+                    _state.update { it.copy(calendars = list) }
+                }
+            } catch (e: Exception) {
+                // T-045: offline between windows is normal (T-044) —
+                // degrade to an error line, keep the last calendars.
+                _state.update { it.copy(error = e.userMessage()) }
             }
         }
         loadWindow()

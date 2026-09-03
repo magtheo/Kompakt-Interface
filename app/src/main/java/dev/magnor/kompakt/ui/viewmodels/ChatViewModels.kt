@@ -10,6 +10,7 @@ import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.ChatTopic
 import dev.magnor.kompakt.domain.EntityId
+import dev.magnor.kompakt.ui.userMessage
 import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.MessageRole
@@ -182,18 +183,24 @@ class ChatThreadViewModel(
         // server catch up a turn that settled after its budget. Re-tick on a
         // slow cadence until the flag clears (e-ink/battery friendly).
         viewModelScope.launch {
-            thread.collect { t ->
-                if (t?.pendingReply == true) {
-                    // A still-pending refetch re-emits an equal snapshot,
-                    // which the StateFlow dedupes — collect would never
-                    // re-fire and the poll would stall after one tick.
-                    // Drive the cadence from a re-reading loop instead.
-                    while (true) {
-                        delay(PENDING_POLL_MS)
-                        if (thread.value?.pendingReply != true) break
-                        refreshTick.value++
+            try {
+                thread.collect { t ->
+                    if (t?.pendingReply == true) {
+                        // A still-pending refetch re-emits an equal snapshot,
+                        // which the StateFlow dedupes — collect would never
+                        // re-fire and the poll would stall after one tick.
+                        // Drive the cadence from a re-reading loop instead.
+                        while (true) {
+                            delay(PENDING_POLL_MS)
+                            if (thread.value?.pendingReply != true) break
+                            refreshTick.value++
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                // T-045: offline between windows is normal (T-044) —
+                // surface via notice, keep the thread on screen.
+                _notice.value = e.userMessage()
             }
         }
     }

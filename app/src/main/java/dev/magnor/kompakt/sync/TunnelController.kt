@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import android.util.Log
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -50,6 +51,19 @@ class TunnelController(private val context: Context) {
     private val mutex = Mutex()
     private var backend: GoBackend? = null
     private var parsed: ParsedConfig? = null
+
+    /**
+     * GoBackend needs a Tunnel handle for the interface name (max 15
+     * chars) — passing null NPEs inside setStateInternal (found via the
+     * T-045 logging, 2026-09-03; this was the REAL reason no tunnel
+     * ever raised, independent of VPN consent).
+     */
+    private val tunnelHandle = object : Tunnel {
+        override fun getName(): String = "kompakt"
+        override fun onStateChange(newState: Tunnel.State) {
+            Log.i(TAG, "tunnel state -> $newState")
+        }
+    }
 
     private data class ParsedConfig(
         val privateKeyBase64: String,
@@ -86,20 +100,40 @@ class TunnelController(private val context: Context) {
      */
     suspend fun up(
         serverBase: String,
-        budgetMs: Long = 20_000,
+        budgetMs: Long = 45_000,
         now: () -> Long = { System.currentTimeMillis() },
     ): Boolean = mutex.withLock {
-        val cfg = loadParsed() ?: return false
+        val cfg = loadParsed() ?: run {
+            Log.w(TAG, "up(): tunnel.conf missing/unparseable — not configured")
+            return false
+        }
         val deadline = now() + budgetMs
-        for (endpoint in EndpointPolicy.candidates(onWifi())) {
+        val candidates = EndpointPolicy.candidates(onWifi())
+        Log.i(TAG, "up(): base=$serverBase wifi=${onWifi()} candidates=$candidates")
+        for (endpoint in candidates) {
             if (now() >= deadline) break
-            val ok = tryUpEndpoint(cfg, endpoint, deadline - now())
-            if (ok && serverReachable(serverBase, remaining = deadline - now())) {
-                _state.value = State.Up
-                return true
+            var ok = tryUpEndpoint(cfg, endpoint, deadline - now())
+            if (!ok) {
+                // Cold VpnService start can outlast GoBackend's internal
+                // wait (~4 s) while the service still comes up right
+                // after (observed 2026-09-03: UP landed 0.6 s late).
+                // One grace retry once the service is warm.
+                kotlinx.coroutines.delay(2_500)
+                if (now() < deadline) ok = tryUpEndpoint(cfg, endpoint, deadline - now())
+            }
+            if (ok) {
+                val reachable = serverReachable(serverBase, remaining = deadline - now())
+                Log.i(TAG, "endpoint $endpoint wg-up=true server-reachable=$reachable")
+                if (reachable) {
+                    _state.value = State.Up
+                    return true
+                }
+            } else {
+                Log.w(TAG, "endpoint $endpoint wg-up=false")
             }
             quietlyDown()
         }
+        Log.w(TAG, "up(): FAILED — no endpoint reached the server")
         _state.value = State.Down
         false
     }
@@ -112,7 +146,8 @@ class TunnelController(private val context: Context) {
 
     private suspend fun quietlyDown() {
         val be = backend ?: return
-        runCatching { withContext(Dispatchers.Main) { be.setState(null, Tunnel.State.DOWN, null) } }
+        runCatching { withContext(Dispatchers.Main) { be.setState(tunnelHandle, Tunnel.State.DOWN, null) } }
+            .onFailure { Log.e(TAG, "setState(DOWN) threw", it) }
     }
 
     private suspend fun tryUpEndpoint(cfg: ParsedConfig, endpoint: String, budgetMs: Long): Boolean {
@@ -136,9 +171,10 @@ class TunnelController(private val context: Context) {
             .build()
         return runCatching {
             withContext(Dispatchers.Main) {
-                be.setState(null, Tunnel.State.UP, wgConfig)
+                be.setState(tunnelHandle, Tunnel.State.UP, wgConfig)
             }
-        }.isSuccess
+        }.onFailure { Log.e(TAG, "endpoint $endpoint setState(UP) threw", it) }
+            .isSuccess
     }
 
     /**
@@ -203,5 +239,6 @@ class TunnelController(private val context: Context) {
 
     private companion object {
         const val CONFIG_NAME = "tunnel.conf"
+        const val TAG = "KompaktTunnel"
     }
 }

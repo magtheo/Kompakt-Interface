@@ -54,7 +54,17 @@ class SyncWindowService : Service() {
             }
             ACTION_INTERACTIVE -> {
                 // Interactive window: hold the tunnel while the app is used.
-                scope.launch { (application as KompaktApplication).tunnelController.up(effectiveBase()) }
+                // Never silent: an up() failure here is the single most
+                // useful diagnostic on the device (T-044 debugging).
+                scope.launch {
+                    val app = application as KompaktApplication
+                    val base = effectiveBase()
+                    val up = app.tunnelController.up(base)
+                    android.util.Log.i(
+                        TAG,
+                        "interactive window: up=$up base=$base state=${app.tunnelController.state.value}",
+                    )
+                }
             }
             else -> {
                 // Background window: one orchestrated burst.

@@ -54,8 +54,12 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         val app = application as KompaktApplication
         if (!app.tunnelController.isConfigured) return
-        if (!app.container.remoteActiveFlow.value) return
+        // Consent ask BEFORE the remoteActiveFlow gate: after a crash
+        // restart the enrollment state may not be loaded yet, and
+        // skipping the ask here stranded the consent dialog forever
+        // (T-044 debugging, 2026-09-03).
         app.tunnelController.prepareIntent()?.let { startActivity(it) }
+        if (!app.container.remoteActiveFlow.value) return
         runCatching { SyncWindowService.startInteractive(this) }
     }
 

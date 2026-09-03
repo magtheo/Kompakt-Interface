@@ -47,8 +47,14 @@ class DiagnosticsViewModel(
     init {
         refresh()
         viewModelScope.launch {
-            syncRepository.observeLastSync().collect { last ->
-                _state.update { it.copy(lastSync = last) }
+            try {
+                syncRepository.observeLastSync().collect { last ->
+                    _state.update { it.copy(lastSync = last) }
+                }
+            } catch (e: Exception) {
+                // T-045: transport failure degrades to the error line —
+                // "never an uncaught exception" must hold here too.
+                _state.update { it.copy(error = e.userMessage()) }
             }
         }
     }

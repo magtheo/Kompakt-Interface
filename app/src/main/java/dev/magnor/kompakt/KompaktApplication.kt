@@ -57,6 +57,14 @@ class KompaktApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // T-045 diagnostics: every uncaught exception gets a full logcat
+        // trace (tag KompaktCrash) before the system handler runs —
+        // coroutine stacks otherwise hide the launching call site.
+        val systemHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            android.util.Log.e("KompaktCrash", "uncaught on thread ${t.name}", e)
+            systemHandler?.uncaughtException(t, e)
+        }
         if (!isMainProcess) return
         val tunnelMode = tunnelController.isConfigured
         if (tunnelMode) {
