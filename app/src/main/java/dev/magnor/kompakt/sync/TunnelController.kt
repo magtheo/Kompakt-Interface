@@ -237,6 +237,22 @@ class TunnelController(private val context: Context) {
         return out
     }
 
+    /**
+     * T-044 gate for HttpApi: true when the tunnel is Up, or an in-flight
+     * up() reaches Up within [timeoutMs]. Returns false as soon as nothing
+     * is raising (Down + no up() holding the mutex) so HTTP callers fail
+     * fast instead of parking the full timeout.
+     */
+    suspend fun awaitReady(timeoutMs: Long = 25_000): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (true) {
+            if (_state.value == State.Up) return true
+            if (!mutex.isLocked) return false
+            if (System.currentTimeMillis() >= deadline) return false
+            kotlinx.coroutines.delay(200)
+        }
+    }
+
     private companion object {
         const val CONFIG_NAME = "tunnel.conf"
         const val TAG = "KompaktTunnel"

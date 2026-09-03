@@ -132,6 +132,9 @@ class AppContainer(
     // talks to the coordinator over the embedded wg tunnel instead of the
     // tailnet URL (see TransportPolicy). Tests default to false.
     private val tunnelConfigured: Boolean = false,
+    // T-044: handed to every HttpApi the container builds — retries a
+    // transport-failed call once the tunnel raise lands.
+    private val tunnelGate: dev.magnor.kompakt.data.remote.TunnelGate? = null,
 ) {
     /** Ink polarity (Light/Inverted) — file-backed, process-lifetime. */
     val themeStore: ThemeStore =
@@ -314,7 +317,7 @@ class AppContainer(
     init {
         // Static remote mode (tests, live smoke): token fixed at construction.
         if (mode is ServerMode.Remote) {
-            activateRemote(HttpApi(TransportPolicy.resolve(mode.baseUrl, tunnelConfigured), mode.token))
+            activateRemote(HttpApi(TransportPolicy.resolve(mode.baseUrl, tunnelConfigured), { mode.token }, tunnelGate = tunnelGate))
         } else {
             // Enrolled mode: follow the enrollment state machine.
             scope.launch {
@@ -324,6 +327,7 @@ class AppContainer(
                             HttpApi(
                                 TransportPolicy.resolve(state.baseUrl, tunnelConfigured),
                                 enrollment.tokenProvider(),
+                                tunnelGate = tunnelGate,
                             )
                         )
                     } else {
@@ -337,6 +341,7 @@ class AppContainer(
                     HttpApi(
                         TransportPolicy.resolve(active.baseUrl, tunnelConfigured),
                         enrollment.tokenProvider(),
+                        tunnelGate = tunnelGate,
                     )
                 )
             }

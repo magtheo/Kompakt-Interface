@@ -45,10 +45,23 @@ import java.util.concurrent.TimeUnit
  * The bearer comes from a provider function so enrollment can rotate
  * the token without rebuilding the stack (Phase 4).
  */
+/**
+ * T-044: interactive opens race the tunnel raise — screens fetch
+ * immediately while up() needs ~5–13 s cold (VpnService start beats
+ * fast). [HttpApi.execute] consults the gate on transport failure and
+ * retries once when the tunnel is (or becomes) Up, so users see data
+ * instead of a stale dead-server error line.
+ */
+fun interface TunnelGate {
+    /** True if the tunnel is Up now, or an in-flight raise reaches Up within [timeoutMs]. */
+    suspend fun awaitReady(timeoutMs: Long): Boolean
+}
+
 class HttpApi(
     baseUrl: String,
     private val tokenProvider: () -> String?,
     private val client: OkHttpClient = defaultClient(),
+    private val tunnelGate: TunnelGate? = null,
 ) {
     constructor(baseUrl: String, token: String) : this(baseUrl, { token })
 
@@ -168,6 +181,18 @@ class HttpApi(
     }
 
     private suspend fun execute(request: Request, timeoutSeconds: Long? = null): String =
+        try {
+            executeOnce(request, timeoutSeconds)
+        } catch (e: OfflineException) {
+            // T-044: the 8 s connect timeout can lose the race against a
+            // tunnel raise that lands seconds later — wait out any
+            // in-flight raise, then retry once. No gate / no raise →
+            // honest OfflineException (screens degrade to an error line).
+            val gate = tunnelGate ?: throw e
+            if (gate.awaitReady(25_000)) executeOnce(request, timeoutSeconds) else throw e
+        }
+
+    private suspend fun executeOnce(request: Request, timeoutSeconds: Long? = null): String =
         withContext(Dispatchers.IO) {
             val callClient = if (timeoutSeconds != null) {
                 // OkHttp's default readTimeout (10s) fires during silent

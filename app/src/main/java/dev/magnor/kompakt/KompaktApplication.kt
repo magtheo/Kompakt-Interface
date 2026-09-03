@@ -37,6 +37,7 @@ class KompaktApplication : Application() {
             captureQueueDir = java.io.File(filesDir, "captures"),
             themeStore = ThemeStore(java.io.File(filesDir, "theme.txt")),
             tunnelConfigured = tunnelController.isConfigured,
+            tunnelGate = dev.magnor.kompakt.data.remote.TunnelGate { tunnelController.awaitReady(it) },
         )
     }
 
