@@ -13,8 +13,8 @@ android {
         applicationId = "dev.magnor.kompakt"
         minSdk = 28
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.5.1-dev"
+        versionCode = 5
+        versionName = "0.6.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -57,6 +57,11 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
+
+    // T-044 (D032): embedded WireGuard tunnel — userspace GoBackend, no root.
+    // The only new dependency; audited: com.wireguard.android:tunnel on Maven
+    // Central, official WireGuard project artifact.
+    implementation("com.wireguard.android:tunnel:1.0.20260102")
 
     // Compose (versions from BOM)
     implementation(platform(libs.androidx.compose.bom))

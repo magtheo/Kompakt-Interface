@@ -12,6 +12,8 @@
     <!-- T-020: local calendar reminders; exact only when OS-granted,
          inexact fallback otherwise (see ReminderScheduler). -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- T-021: Phase 11 voice input — runtime permission, prompted on
          first mic tap (see MicButton). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -38,6 +40,7 @@
         android:label="Kompakt"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true">
 
         <activity
@@ -61,6 +64,40 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="persistent-sse-alert-stream" />
         </service>
+
+        <!-- T-044 (D032): the sync-window service — the only thing that
+             brings the embedded wg tunnel up (background windows from the
+             15-min alarm + interactive windows while the app is used). -->
+        <service
+            android:name=".sync.SyncWindowService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="windowed-wireguard-sync" />
+        </service>
+
+        <!-- T-044: required declaration for the userspace wg backend
+             (com.wireguard.android:tunnel GoBackend). System-bound. -->
+        <service
+            android:name="com.wireguard.android.backend.GoBackend$VpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false" />
+
+        <!-- T-044: 15-min sync-window tick (exact alarm; inexact fallback
+             inside SyncWindowScheduler). -->
+        <receiver
+            android:name=".sync.SyncWindowReceiver"
+            android:exported="false" />
+
+        <!-- T-044: alarms die at reboot — re-arm the window cadence. -->
+        <receiver
+            android:name=".sync.BootCompletedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- T-042: no-root recents access on inkOS — Volume Up long-press
              opens the SystemUI overview (GLOBAL_ACTION_RECENTS). -->

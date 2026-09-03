@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- T-044: cleartext is permitted ONLY to the WireGuard tunnel address
+     (10.127.127.1) — inside the tunnel, wg is the encryption layer, TLS
+     would add certificate machinery for nothing. Everything else stays
+     https-only (tailscale serve path, historical enrollment URL). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.127.127.1</domain>
+    </domain-config>
+</network-security-config>

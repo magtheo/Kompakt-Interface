@@ -12,6 +12,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import dev.magnor.kompakt.notifications.AlertNotifications
+import dev.magnor.kompakt.sync.SyncWindowService
 import dev.magnor.kompakt.ui.KompaktApp
 import dev.magnor.kompakt.ui.theme.KompaktTheme
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,6 +46,25 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         // Activity alive, notification tapped with SINGLE_TOP → route here.
         intent.routeExtra()?.let { pendingRoute.value = it }
+    }
+
+    // T-044 (D032): app in use = interactive sync window; app backgrounded
+    // = window closes. Plus the one-time VPN consent dialog.
+    override fun onStart() {
+        super.onStart()
+        val app = application as KompaktApplication
+        if (!app.tunnelController.isConfigured) return
+        if (!app.container.remoteActiveFlow.value) return
+        app.tunnelController.prepareIntent()?.let { startActivity(it) }
+        runCatching { SyncWindowService.startInteractive(this) }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        val app = application as KompaktApplication
+        if (app.tunnelController.isConfigured) {
+            runCatching { SyncWindowService.stop(this) }
+        }
     }
 
     private fun Intent.routeExtra(): String? =

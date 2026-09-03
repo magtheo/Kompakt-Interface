@@ -2,6 +2,7 @@ package dev.magnor.kompakt.data
 
 import dev.magnor.kompakt.data.fake.FakeAgentRepository
 import dev.magnor.kompakt.data.fake.FakeCaptureRepository
+import dev.magnor.kompakt.sync.TransportPolicy
 import dev.magnor.kompakt.data.fake.FakeChangeLog
 import dev.magnor.kompakt.data.fake.FakeChatRepository
 import dev.magnor.kompakt.data.fake.FakeData
@@ -127,6 +128,10 @@ class AppContainer(
     secretVault: SecretVault? = null,
     captureQueueDir: java.io.File? = null,
     themeStore: ThemeStore? = null,
+    // T-044 (D032): true when files/tunnel.conf exists → the remote stack
+    // talks to the coordinator over the embedded wg tunnel instead of the
+    // tailnet URL (see TransportPolicy). Tests default to false.
+    private val tunnelConfigured: Boolean = false,
 ) {
     /** Ink polarity (Light/Inverted) — file-backed, process-lifetime. */
     val themeStore: ThemeStore =
@@ -309,13 +314,18 @@ class AppContainer(
     init {
         // Static remote mode (tests, live smoke): token fixed at construction.
         if (mode is ServerMode.Remote) {
-            activateRemote(HttpApi(mode.baseUrl, mode.token))
+            activateRemote(HttpApi(TransportPolicy.resolve(mode.baseUrl, tunnelConfigured), mode.token))
         } else {
             // Enrolled mode: follow the enrollment state machine.
             scope.launch {
                 enrollment.state.collect { state ->
                     if (state is EnrollmentManager.State.Active) {
-                        activateRemote(HttpApi(state.baseUrl, enrollment.tokenProvider()))
+                        activateRemote(
+                            HttpApi(
+                                TransportPolicy.resolve(state.baseUrl, tunnelConfigured),
+                                enrollment.tokenProvider(),
+                            )
+                        )
                     } else {
                         deactivateRemote()
                     }
@@ -323,7 +333,12 @@ class AppContainer(
             }
             // Restore an already-active enrollment at boot (vault read is sync).
             (enrollment.state.value as? EnrollmentManager.State.Active)?.let { active ->
-                activateRemote(HttpApi(active.baseUrl, enrollment.tokenProvider()))
+                activateRemote(
+                    HttpApi(
+                        TransportPolicy.resolve(active.baseUrl, tunnelConfigured),
+                        enrollment.tokenProvider(),
+                    )
+                )
             }
         }
     }
