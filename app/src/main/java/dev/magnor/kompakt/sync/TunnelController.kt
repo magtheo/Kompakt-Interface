@@ -108,7 +108,7 @@ class TunnelController(private val context: Context) {
             return false
         }
         val deadline = now() + budgetMs
-        val candidates = EndpointPolicy.candidates(onWifi())
+        val candidates = EndpointPolicy.ordered(onWifi(), readLastGoodEndpoint())
         Log.i(TAG, "up(): base=$serverBase wifi=${onWifi()} candidates=$candidates")
         for (endpoint in candidates) {
             if (now() >= deadline) break
@@ -126,6 +126,7 @@ class TunnelController(private val context: Context) {
                 Log.i(TAG, "endpoint $endpoint wg-up=true server-reachable=$reachable")
                 if (reachable) {
                     _state.value = State.Up
+                    writeLastGoodEndpoint(endpoint)
                     return true
                 }
             } else {
@@ -179,16 +180,19 @@ class TunnelController(private val context: Context) {
 
     /**
      * Any HTTP response (even 404) proves the wg path carries traffic.
-     * Handshake + RTT typically complete in <1.5 s on LAN.
+     * Handshake + RTT typically complete in <1.5 s on LAN. A path that
+     * hasn't answered by attempt 3 (≈10 s) is structurally dead (e.g.
+     * hairpin NAT), not slow — fail the endpoint fast so fallback (and
+     * the HttpApi gate) fits inside the window budget.
      */
     private suspend fun serverReachable(serverBase: String, remaining: Long): Boolean =
         withContext(Dispatchers.IO) {
             if (remaining <= 0) return@withContext false
             val client = OkHttpClient.Builder()
-                .callTimeout(minOf(remaining, 4_000), TimeUnit.MILLISECONDS)
+                .callTimeout(minOf(remaining, 3_000), TimeUnit.MILLISECONDS)
                 .build()
             val url = runCatching { serverBase.toHttpUrl() }.getOrNull() ?: return@withContext false
-            val attempts = 5
+            val attempts = 3
             repeat(attempts) { attempt ->
                 runCatching {
                     client.newCall(Request.Builder().url(url).head().build()).execute()
@@ -255,6 +259,17 @@ class TunnelController(private val context: Context) {
 
     private companion object {
         const val CONFIG_NAME = "tunnel.conf"
+        const val LAST_GOOD_NAME = "last_good_endpoint"
         const val TAG = "KompaktTunnel"
+    }
+
+    /** T-044: persist the endpoint that last carried traffic — [EndpointPolicy.ordered]. */
+    private fun readLastGoodEndpoint(): String? =
+        runCatching { File(context.filesDir, LAST_GOOD_NAME).readText().trim() }
+            .getOrNull()?.takeIf { it.isNotEmpty() }
+
+    private fun writeLastGoodEndpoint(endpoint: String) {
+        runCatching { File(context.filesDir, LAST_GOOD_NAME).writeText(endpoint) }
+            .onFailure { Log.w(TAG, "last-good persist failed", it) }
     }
 }

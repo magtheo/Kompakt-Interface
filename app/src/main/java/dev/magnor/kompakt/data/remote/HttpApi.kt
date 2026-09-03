@@ -186,10 +186,14 @@ class HttpApi(
         } catch (e: OfflineException) {
             // T-044: the 8 s connect timeout can lose the race against a
             // tunnel raise that lands seconds later — wait out any
-            // in-flight raise, then retry once. No gate / no raise →
-            // honest OfflineException (screens degrade to an error line).
+            // in-flight raise, then retry once. The gate budget MUST
+            // outlast TunnelController.up()'s own 45 s budget: a wake
+            // race can burn ~30 s on a dead endpoint before the good
+            // one lands (2026-09-03 11:04: gate died 25 s in, tunnel
+            // Up at 38 s — stale error on a working line).
+            // No gate / no raise in flight → honest OfflineException.
             val gate = tunnelGate ?: throw e
-            if (gate.awaitReady(25_000)) executeOnce(request, timeoutSeconds) else throw e
+            if (gate.awaitReady(50_000)) executeOnce(request, timeoutSeconds) else throw e
         }
 
     private suspend fun executeOnce(request: Request, timeoutSeconds: Long? = null): String =

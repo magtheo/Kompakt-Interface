@@ -19,4 +19,17 @@ object EndpointPolicy {
     fun candidates(onWifi: Boolean): List<String> =
         if (onWifi) listOf(LAN_ENDPOINT, PUBLIC_ENDPOINT)
         else listOf(PUBLIC_ENDPOINT, LAN_ENDPOINT)
+
+    /**
+     * T-044: the onWifi() snapshot loses the wake race on cold e-ink
+     * opens (WiFi caps not reported yet → PUBLIC first at home → ~30 s
+     * burned on the hairpin-dead path; observed 2026-09-03 11:04).
+     * The last endpoint that actually carried traffic goes first,
+     * whatever the WiFi snapshot said.
+     */
+    fun ordered(onWifi: Boolean, lastGood: String?): List<String> {
+        val base = candidates(onWifi)
+        if (lastGood == null || lastGood !in base) return base
+        return listOf(lastGood) + base.filter { it != lastGood }
+    }
 }
