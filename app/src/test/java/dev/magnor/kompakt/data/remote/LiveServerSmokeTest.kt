@@ -21,7 +21,7 @@ import org.junit.Test
  * KOMPACT_LIVE_URL + KOMPACT_LIVE_TOKEN are set (secrets never live in
  * the repo), e.g.:
  *
- *   KOMPACT_LIVE_URL=http://dev-server.example.ts.net:8650 \
+ *   KOMPACT_LIVE_URL=http://your-coordinator.example.com:8650 \
  *   KOMPACT_LIVE_TOKEN=… ./scripts/verify.sh
  *
  * This is the T-004 acceptance check: client connects, negotiation

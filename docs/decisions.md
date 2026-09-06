@@ -877,7 +877,7 @@ The following remain intentionally open:
 - exact calendar data integration,
 - exact cache retention durations,
 - whether Class 4 actions may ever be approved from Kompakt,
-- final open-source license for the app repository.
+- ~~final open-source license for the app repository~~ — **resolved Sep 2026**: Apache-2.0 (D036).
 
 These should be resolved through implementation or real-device testing.
 
@@ -901,8 +901,31 @@ defense (1) — the degradation hardening — which addresses the actual Sep 2 i
 class (offline exceptions killing the process). If a future crash class emerges, the
 answer is fixing the crash, not process isolation.
 
-Operational note (same session): agent-driven gradle builds must set
-`ANDROID_USER_HOME=/home/user/.android` — the Hermes terminal env carries
-`XDG_CONFIG_HOME=/home/user/.config`, which redirects debug signing to
-`~/.config/.android/debug.keystore` (freshly minted) and produces
-INSTALL_FAILED_UPDATE_INCOMPATIBLE against device builds.
+Operational note (same session): agent-driven gradle builds must keep the
+Android toolchain home consistent — redirecting `XDG_CONFIG_HOME` for the
+build environment makes the SDK mint a fresh debug keystore elsewhere and
+produces INSTALL_FAILED_UPDATE_INCOMPATIBLE against device builds. Pin
+`ANDROID_USER_HOME` explicitly when building from a non-standard shell.
+
+## D036 — The repository is public under Apache-2.0
+
+The Kompakt-Interface repository is published as open source under the
+Apache License 2.0 (the `LICENSE` file at the repo root is authoritative).
+
+Rationale: permissive, patent-grant covering, compatible with the
+third-party dependencies in use (Compose/Material3=Apache-2.0,
+WireGuard tunnel library=Apache-2.0, Mudita MMD, kotlinx.datetime=MIT,
+OkHttp=Apache-2.0, BouncyCastle=MIT).
+
+Publishing constraints (enforced from Sep 2026):
+
+- No deployment-specific infrastructure in tracked files: WireGuard
+  endpoints come from the untracked `local.properties` via BuildConfig
+  (T-049(4) interim), defaulting to RFC 5737 documentation addresses.
+  End-state: enrollment delivers endpoints per device.
+- Live-server smoke tests stay opt-in via `KOMPACT_LIVE_URL` /
+  `KOMPACT_LIVE_TOKEN` env vars; secrets never live in the repo.
+- Git history is scrubbed of private infrastructure details at
+  publication time; treat any pre-publication commit hashes as void.
+
+This closes the deferred "final open-source license" item.

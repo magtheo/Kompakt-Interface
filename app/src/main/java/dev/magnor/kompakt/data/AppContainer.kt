@@ -114,9 +114,10 @@ sealed interface ServerMode {
     /** In-memory demo data (Phase 2 fakes). */
     data object Fake : ServerMode
 
-    /** Live coordinator: base URL (e.g. https://dev-server.example.ts.net:8650 — tailscale
-     *  serve terminates TLS, so the scheme must be https; cleartext is blocked by network
-     *  security policy and fails with CLEARTEXT at enrollment) + bearer token. */
+    /** Live coordinator: base URL (e.g. https://your-coordinator.example.com:8650 — a TLS-terminating
+     *  reverse proxy in front of the coordinator; the scheme must be https;
+     *  cleartext is blocked by network security policy and fails with
+     *  CLEARTEXT at enrollment) + bearer token. */
     data class Remote(val baseUrl: String, val token: String) : ServerMode
 }
 

@@ -12,7 +12,7 @@ class TransportPolicyTest {
 
     @Test
     fun `tunnel off returns enrolled url untouched`() {
-        val url = "https://dev-server.example.ts.net:8650"
+        val url = "https://coordinator.example.com:8650"
         assertEquals(url, TransportPolicy.resolve(url, tunnelConfigured = false))
     }
 
@@ -21,7 +21,7 @@ class TransportPolicyTest {
         assertEquals(
             "http://10.127.127.1:8650",
             TransportPolicy.resolve(
-                "https://dev-server.example.ts.net:8650",
+                "https://coordinator.example.com:8650",
                 tunnelConfigured = true,
             ),
         )

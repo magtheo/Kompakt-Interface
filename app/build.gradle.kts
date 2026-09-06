@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -16,6 +18,28 @@ android {
         versionCode = 5
         versionName = "0.6.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // WireGuard endpoint addresses are deployment-specific and never
+        // belong in source control (D032/T-049(4): endpoint as config).
+        // Set in the untracked local.properties:
+        //   kompakt.wg.lanEndpoint=192.168.x.y:51821
+        //   kompakt.wg.publicEndpoint=host:51821
+        // Defaults are RFC 5737/3330 documentation addresses so clean
+        // checkouts and CI build without any private configuration.
+        val endpoints = rootProject.file("local.properties").let { f ->
+            if (f.exists()) Properties().apply { f.inputStream().use { load(it) } }
+            else Properties()
+        }
+        buildConfigField(
+            "String",
+            "WG_LAN_ENDPOINT",
+            "\"${endpoints.getProperty("kompakt.wg.lanEndpoint") ?: "192.0.2.10:51821"}\"",
+        )
+        buildConfigField(
+            "String",
+            "WG_PUBLIC_ENDPOINT",
+            "\"${endpoints.getProperty("kompakt.wg.publicEndpoint") ?: "203.0.113.10:51821"}\"",
+        )
     }
 
     buildTypes {
@@ -39,6 +63,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
