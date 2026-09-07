@@ -19,8 +19,8 @@ the data, the LLM/agent backends, and enrollment.
 
 - Not a standalone app: no server, no data. There is no local account system
   and no cloud service run by us — you run your own coordinator.
-- Not a general launcher/OS replacement (though it does integrate with the
-  Kompakt's physical keys and e-ink constraints deeply).
+- Not a general launcher/OS replacement (though it does integrate deeply
+  with the Kompakt's capacitive keys and e-ink constraints).
 - Not finished: voice, background delivery, and Kompakt-specific tuning are
   later phases per the development plan.
 
