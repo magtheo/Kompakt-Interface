@@ -189,6 +189,102 @@ class MarkdownTest {
         assertEquals(emptyList<MdBlock>(), parseMarkdown("  \n \n"))
     }
 
+    // ---- tables ----
+
+    @Test
+    fun `pipe table parses header delimiter and two body rows`() {
+        val blocks = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 5 |")
+        assertEquals(1, blocks.size)
+        assertEquals(
+            MdBlock.Table(
+                MdTableRow(listOf(cell("Name"), cell("Age"))),
+                listOf(
+                    MdTableRow(listOf(cell("Alice"), cell("30"))),
+                    MdTableRow(listOf(cell("Bob"), cell("5"))),
+                ),
+            ),
+            blocks[0],
+        )
+    }
+
+    @Test
+    fun `inline styles parse inside table cells`() {
+        val table = parseMarkdown(
+            "| **Name** | `x` |\n| --- | --- |\n| [kompakt](https://example.com) | ~~y~~ |",
+        )[0] as MdBlock.Table
+        assertEquals(listOf(MdSpan("Name", MdStyle.BOLD)), table.header.cells[0].spans)
+        assertEquals(listOf(MdSpan("x", MdStyle.CODE)), table.header.cells[1].spans)
+        assertEquals(listOf(MdSpan("kompakt", MdStyle.LINK)), table.rows[0].cells[0].spans)
+        assertEquals(listOf(MdSpan("y", MdStyle.STRIKE)), table.rows[0].cells[1].spans)
+    }
+
+    @Test
+    fun `row without delimiter row stays a paragraph`() {
+        val blocks = parseMarkdown("a | b\nc | d")
+        assertEquals(listOf(MdBlock.Paragraph(listOf(MdSpan("a | b c | d", MdStyle.PLAIN)))), blocks)
+    }
+
+    @Test
+    fun `table with no body rows still parses`() {
+        val blocks = parseMarkdown("| a | b |\n| --- | --- |\n\nafter")
+        assertEquals(
+            listOf(
+                MdBlock.Table(MdTableRow(listOf(cell("a"), cell("b"))), emptyList()),
+                MdBlock.Paragraph(listOf(MdSpan("after", MdStyle.PLAIN))),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun `outer pipes optional and alignment colons consumed`() {
+        val blocks = parseMarkdown("h1 | h2\n:--- | ---:\n1 | 2")
+        assertEquals(
+            MdBlock.Table(
+                MdTableRow(listOf(cell("h1"), cell("h2"))),
+                listOf(MdTableRow(listOf(cell("1"), cell("2")))),
+            ),
+            blocks[0],
+        )
+    }
+
+    @Test
+    fun `table interrupts paragraph which stays a paragraph`() {
+        val blocks = parseMarkdown("Intro text\n| a | b |\n| --- | --- |\n| 1 | 2 |")
+        assertEquals(
+            listOf(
+                MdBlock.Paragraph(listOf(MdSpan("Intro text", MdStyle.PLAIN))),
+                MdBlock.Table(
+                    MdTableRow(listOf(cell("a"), cell("b"))),
+                    listOf(MdTableRow(listOf(cell("1"), cell("2")))),
+                ),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun `ragged body rows are padded and trimmed to header width`() {
+        val table =
+            parseMarkdown("| a | b | c |\n| --- | --- | --- |\n| one |\n| x | y | z | extra |")[0] as MdBlock.Table
+        assertEquals(listOf(cell("one"), cell(""), cell("")), table.rows[0].cells)
+        assertEquals(listOf(cell("x"), cell("y"), cell("z")), table.rows[1].cells)
+    }
+
+    @Test
+    fun `escaped pipe stays inside its cell`() {
+        val table = parseMarkdown("| a \\| b | c |\n| --- | --- |\n| d | e |")[0] as MdBlock.Table
+        assertEquals(listOf(cell("a | b"), cell("c")), table.header.cells)
+    }
+
+    @Test
+    fun `mdPreview flattens tables to plain text`() {
+        assertEquals("a / b · 1 / 2", mdPreview("| a | b |\n| --- | --- |\n| 1 | 2 |", 100))
+    }
+
+    /** Mirrors the parser: raw cell text → inline spans. */
+    private fun cell(text: String) = MdTableCell(parseInline(text))
+
     // ---- preview ----
 
     @Test

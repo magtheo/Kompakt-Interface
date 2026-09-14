@@ -656,15 +656,16 @@ third-party renderer, no HTML — ever (protocol constraint: responses
 are structured text, never arbitrary markup).
 
 Supported: headings, bullet/ordered/task lists (nested), fenced code
-blocks, quotes, rules, `**bold**`, `*italic*`, `***both***`, `` `code` ``,
-`~~strike~~`, `[label](url)` rendered as an underlined label.
+blocks, quotes, rules, GFM pipe tables (amendment below), `**bold**`,
+`*italic*`, `***both***`, `` `code` ``, `~~strike~~`, `[label](url)`
+rendered as an underlined label.
 
 Deliberately unsupported:
 
 - `_underscore emphasis_` — snake_case identifiers would mangle;
   asterisk-only, always,
-- tables and nested inline styles — rare in conversation, costly on
-  e-ink; render as plain text instead of breaking,
+- nested inline styles — rare in conversation, costly on e-ink;
+  render as plain text instead of breaking,
 - emphasis requires non-space content boundaries (`2 * 3 * 4` stays
   literal — CommonMark rule).
 
@@ -672,6 +673,16 @@ Styling is monochrome-only (weight, family, decoration, size — D017):
 no color, no animation; code blocks are bordered monospace cards.
 Message previews (thread lists, jump indexes) strip markers rather
 than render them.
+
+**Amendment (Sep 2026 — chat table leg):** LLM replies carry GFM pipe
+tables often enough that leaving them as paragraph mush broke
+readability, so tables now parse into a dedicated block and render as
+monospace-aligned plain text (bold header + dashed divider, padded
+columns in a bordered card — same treatment as code blocks). The
+original D027 verdict stands: no grid chrome, no color, no alignment
+polish — "render as plain text instead of breaking" remains the rule;
+only the breaking part changed. Cell content uses the existing inline
+span set; previews flatten tables to plain text.
 
 ---
 

@@ -36,17 +36,25 @@ import com.mudita.mmd.components.text.TextMMD
  *
  * Supported blocks: paragraphs, `#` headings, bullet / ordered / task
  * lists (with one-level-per-2-spaces nesting), fenced code blocks,
- * `>` quotes, thematic breaks. Inline: **bold**, *italic*, ***both***,
- * `code`, ~~strike~~, [label](url) links (label kept, underlined).
+ * `>` quotes, thematic breaks, GFM pipe tables (rendered as
+ * monospace-aligned plain text — D017, no grid chrome). Inline:
+ * **bold**, *italic*, ***both***, `code`, ~~strike~~, [label](url)
+ * links (label kept, underlined) — also inside table cells.
  *
  * Deliberately NOT supported: `_underscore_` emphasis (snake_case
  * identifiers are common in agent/chat prose and would be mangled),
- * nested inline styles, tables (rendered as plain paragraphs), images.
+ * nested inline styles, images.
  */
 
 enum class MdStyle { PLAIN, BOLD, ITALIC, BOLD_ITALIC, CODE, STRIKE, LINK }
 
 data class MdSpan(val text: String, val style: MdStyle = MdStyle.PLAIN)
+
+/** One table cell: inline spans (GFM allows styles inside cells). */
+data class MdTableCell(val spans: List<MdSpan>)
+
+/** One table row of exactly the header's column count. */
+data class MdTableRow(val cells: List<MdTableCell>)
 
 sealed class MdBlock {
     data class Paragraph(val spans: List<MdSpan>) : MdBlock()
@@ -54,6 +62,7 @@ sealed class MdBlock {
     data class ListItem(val indent: Int, val marker: String, val spans: List<MdSpan>) : MdBlock()
     data class Quote(val spans: List<MdSpan>) : MdBlock()
     data class CodeBlock(val lines: List<String>) : MdBlock()
+    data class Table(val header: MdTableRow, val rows: List<MdTableRow>) : MdBlock()
     data object Rule : MdBlock()
 }
 
@@ -70,6 +79,57 @@ private val taskDonePattern = Regex("^\\[[xX]]\\s")
 private val inlinePattern = Regex(
     """(`[^`\n]+`)|(\*\*\*\S(?:[^*\n]*\S)?\*\*\*)|(\*\*\S(?:[^*\n]*\S)?\*\*)|(\*\S(?:[^*\n]*\S)?\*)|(~~\S(?:[^~\n]*\S)?~~)|(\[[^\]\n]+\]\([^)\s]+\))""",
 )
+
+// GFM pipe tables: a row line whose next line is a delimiter row
+// (`|---|---:|`, colons optional). Header and delimiter must have the
+// same cell count; leading/trailing pipes are optional; `\|` is a
+// literal pipe inside a cell. A row without a following delimiter row
+// is just paragraph text — no false positives.
+private const val ESCAPED_PIPE = '\u0000' // split sentinel for `\|`
+private val delimiterCell = Regex(":?-+:?")
+
+/** Split one pipe row into trimmed cell texts (outer pipes optional). */
+private fun tableRowCells(line: String): List<String> {
+    var body = line.trim().replace("\\|", ESCAPED_PIPE.toString())
+    if (body.startsWith('|')) body = body.drop(1)
+    // A trailing `\|` is an escaped pipe, not a row terminator.
+    if (body.endsWith('|') && !body.endsWith("\\|")) body = body.dropLast(1)
+    return body.split('|').map { cell -> cell.trim().replace(ESCAPED_PIPE, '|') }
+}
+
+/** Column count if [line] is a GFM delimiter row (`---`, `:--:`, …), else null. */
+private fun tableDelimiterColumns(line: String): Int? {
+    val cells = tableRowCells(line)
+    return if (cells.isNotEmpty() && cells.all { delimiterCell.matches(it) }) cells.size else null
+}
+
+/** GFM rows may under- or overshoot the header's cell count. */
+private fun padRow(cells: List<String>, columns: Int): List<String> =
+    cells.take(columns) + List((columns - cells.size).coerceAtLeast(0)) { "" }
+
+/**
+ * Consume a table starting at the header row [headerIdx] (delimiter at
+ * [headerIdx] + 1). Body rows run until a blank line, a line with no
+ * pipe, or the start of another block (fence, heading, list). Returns
+ * the index of the last consumed line.
+ */
+private fun appendTable(blocks: MutableList<MdBlock>, lines: List<String>, headerIdx: Int, columns: Int): Int {
+    val cell = { text: String -> MdTableCell(parseInline(text)) }
+    val header = MdTableRow(padRow(tableRowCells(lines[headerIdx]), columns).map(cell))
+    val rows = mutableListOf<MdTableRow>()
+    var j = headerIdx + 2
+    while (j < lines.size) {
+        val t = lines[j].trim()
+        if (t.isEmpty() || !t.contains('|')) break
+        if (t.startsWith("```") || t.startsWith("~~~") || headingPattern.containsMatchIn(t) ||
+            bulletPattern.containsMatchIn(t) || orderedPattern.containsMatchIn(t)
+        ) break
+        rows += MdTableRow(padRow(tableRowCells(t), columns).map(cell))
+        j++
+    }
+    blocks += MdBlock.Table(header, rows)
+    return j - 1
+}
 
 /** Split raw LLM text into typed blocks. Pure function — unit tested. */
 fun parseMarkdown(raw: String): List<MdBlock> {
@@ -157,9 +217,20 @@ fun parseMarkdown(raw: String): List<MdBlock> {
                 quote.append(trimmed.dropWhile { it == '>' }.trim())
             }
             else -> {
-                flushQuote()
-                if (paragraph.isNotEmpty()) paragraph.append(' ')
-                paragraph.append(trimmed)
+                // GFM table start: this line is a row and the next one is a
+                // matching delimiter row. A table may interrupt a paragraph —
+                // earlier lines flush as a Paragraph, the row becomes the header.
+                val columns = lines.getOrNull(i + 1)?.trim()?.let(::tableDelimiterColumns)
+                val header = if (columns != null) tableRowCells(trimmed) else null
+                if (columns != null && header != null && trimmed.contains('|') && header.size == columns) {
+                    flushParagraph()
+                    flushQuote()
+                    i = appendTable(blocks, lines, i, columns)
+                } else {
+                    flushQuote()
+                    if (paragraph.isNotEmpty()) paragraph.append(' ')
+                    paragraph.append(trimmed)
+                }
             }
         }
         i++
@@ -205,28 +276,56 @@ fun mdPreview(raw: String, maxChars: Int): String {
             is MdBlock.ListItem -> "${block.marker} ${block.spans.joinToString("") { it.text }}"
             is MdBlock.Quote -> block.spans.joinToString("") { it.text }
             is MdBlock.CodeBlock -> block.lines.joinToString(" ")
+            is MdBlock.Table ->
+                (listOf(block.header) + block.rows).joinToString(" · ") { row ->
+                    row.cells.joinToString(" / ") { cell -> cell.spans.joinToString("") { it.text } }
+                }
             MdBlock.Rule -> "—"
         }
     }
     return if (plain.length <= maxChars) plain else plain.take(maxChars - 1).trimEnd() + "…"
 }
 
+private fun spanStyle(style: MdStyle, base: FontWeight?): SpanStyle {
+    val baseStyle = SpanStyle(fontWeight = base)
+    return when (style) {
+        MdStyle.PLAIN -> baseStyle
+        MdStyle.BOLD -> baseStyle.copy(fontWeight = FontWeight.Bold)
+        MdStyle.ITALIC -> baseStyle.copy(fontStyle = FontStyle.Italic)
+        MdStyle.BOLD_ITALIC -> baseStyle.copy(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic)
+        MdStyle.CODE -> baseStyle.copy(fontFamily = FontFamily.Monospace)
+        MdStyle.STRIKE -> baseStyle.copy(textDecoration = TextDecoration.LineThrough)
+        MdStyle.LINK -> baseStyle.copy(textDecoration = TextDecoration.Underline)
+    }
+}
+
 private fun annotated(spans: List<MdSpan>, base: FontWeight?): AnnotatedString =
     buildAnnotatedString {
-        val baseStyle = SpanStyle(fontWeight = base)
-        spans.forEach { span ->
-            val style = when (span.style) {
-                MdStyle.PLAIN -> baseStyle
-                MdStyle.BOLD -> baseStyle.copy(fontWeight = FontWeight.Bold)
-                MdStyle.ITALIC -> baseStyle.copy(fontStyle = FontStyle.Italic)
-                MdStyle.BOLD_ITALIC -> baseStyle.copy(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic)
-                MdStyle.CODE -> baseStyle.copy(fontFamily = FontFamily.Monospace)
-                MdStyle.STRIKE -> baseStyle.copy(textDecoration = TextDecoration.LineThrough)
-                MdStyle.LINK -> baseStyle.copy(textDecoration = TextDecoration.Underline)
-            }
-            withStyle(style) { append(span.text) }
-        }
+        spans.forEach { span -> withStyle(spanStyle(span.style, base)) { append(span.text) } }
     }
+
+/** Per-column max visible cell width — monospace text pads to these. */
+private fun tableColumnWidths(table: MdBlock.Table): List<Int> {
+    val rows = listOf(table.header) + table.rows
+    return (0 until table.header.cells.size).map { col ->
+        rows.maxOf { row -> row.cells[col].spans.sumOf { it.text.length } }
+    }
+}
+
+/** One row as padded, pipe-separated spans (e-ink plain text, D017). */
+private fun tableRowText(row: MdTableRow, widths: List<Int>, base: FontWeight?): AnnotatedString {
+    val builder = AnnotatedString.Builder()
+    row.cells.forEachIndexed { col, cell ->
+        if (col > 0) builder.append(" | ")
+        cell.spans.forEach { span ->
+            builder.withStyle(spanStyle(span.style, base)) { append(span.text) }
+        }
+        builder.append(" ".repeat(widths[col] - cell.spans.sumOf { it.text.length }))
+    }
+    return builder.toAnnotatedString()
+}
+
+private fun tableDivider(widths: List<Int>): String = widths.joinToString("-+-") { "-".repeat(it) }
 
 /**
  * Renders [raw] markdown. Monochrome styling only: weight, family,
@@ -304,6 +403,31 @@ fun MarkdownText(
                         block.lines.forEach { codeLine ->
                             TextMMD(
                                 text = codeLine.ifEmpty { " " },
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
+                    }
+                }
+                is MdBlock.Table -> CardMMD(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp)) {
+                        val widths = tableColumnWidths(block)
+                        TextMMD(
+                            text = tableRowText(block.header, widths, FontWeight.Bold),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                        )
+                        TextMMD(
+                            text = AnnotatedString(tableDivider(widths)),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                        )
+                        block.rows.forEach { row ->
+                            TextMMD(
+                                text = tableRowText(row, widths, baseFontWeight),
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 12.sp,
                                 lineHeight = 16.sp,
