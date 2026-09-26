@@ -114,6 +114,18 @@ class TunnelController(private val context: Context) {
         now: () -> Long = { System.currentTimeMillis() },
     ): Boolean = mutex.withLock {
         generation += 1
+        // T-050: reuse a live tunnel — re-dialing a healthy session exposes
+        // the raise to a fresh setState freeze-stall and needlessly breaks a
+        // working interactive hold (observed 10:05 window re-dialing a
+        // held-up tunnel into failure). Probe first; only re-dial on proof
+        // the path is dead.
+        if (_state.value == State.Up) {
+            if (serverReachable(serverBase, minOf(budgetMs, 10_000))) {
+                Log.i(TAG, "up(): already Up — probe OK, reusing live tunnel")
+                return true
+            }
+            Log.i(TAG, "up(): Up but server unreachable — re-dialing")
+        }
         val cfg = loadParsed() ?: run {
             Log.w(TAG, "up(): tunnel.conf missing/unparseable — not configured")
             return false
