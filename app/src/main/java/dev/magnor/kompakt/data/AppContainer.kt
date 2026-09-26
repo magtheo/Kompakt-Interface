@@ -315,6 +315,17 @@ class AppContainer(
         remoteStack?.let { capabilityStore.refresh(it.sync) }
     }
 
+    /**
+     * T-050: the base every tunnel-mode caller dials — enrolled base
+     * resolved for tunnel transport, falling back to the tunnel address
+     * (pre-enrollment). Single source for the sync service AND the active
+     * HttpApi gate.
+     */
+    fun effectiveBase(): String =
+        enrollment.activeBaseUrl()
+            ?.let { TransportPolicy.resolve(it, tunnelConfigured = tunnelConfigured) }
+            ?: "http://${TransportPolicy.TUNNEL_HOST}:8650"
+
     init {
         // Static remote mode (tests, live smoke): token fixed at construction.
         if (mode is ServerMode.Remote) {

@@ -47,9 +47,18 @@ class SyncWindowService : Service() {
         }
         when (intent?.action) {
             ACTION_STOP -> {
+                // T-050: capture the generation NOW — if an up() starts after
+                // this moment (fast close→reopen), down() is skipped and the
+                // service is NOT stopped: the newer window owns the tunnel.
+                val app = application as KompaktApplication
+                val gen = app.tunnelController.generation
                 scope.launch {
-                    (application as KompaktApplication).tunnelController.down()
-                    stopSelf()
+                    val tornDown = app.tunnelController.down(expectedGeneration = gen)
+                    if (tornDown) {
+                        stopSelf()
+                    } else {
+                        android.util.Log.i(TAG, "stop superseded (gen=$gen) — newer window owns the tunnel")
+                    }
                 }
             }
             ACTION_INTERACTIVE -> {
@@ -74,10 +83,25 @@ class SyncWindowService : Service() {
                     val result = SyncWindowOrchestrator(
                         tunnelUp = { app.tunnelController.up(effectiveBase()) },
                         burst = { runBurst(container) },
-                        down = { app.tunnelController.down() },
+                        down = {
+                            // T-050: a foreground app owns the tunnel — a
+                            // background window finishing under it must NOT
+                            // tear it down (Sep 26: 09:20 teardown under a
+                            // resumed MainActivity stranded the UI offline).
+                            // MainActivity.onStop still tears down on leave (D032).
+                            if (app.uiVisible) {
+                                android.util.Log.i(TAG, "window done; app foreground — tunnel held for interactive use")
+                            } else {
+                                app.tunnelController.down()
+                            }
+                        },
                     ).runWindow()
                     android.util.Log.d(TAG, "window result: $result")
-                    stopSelf()
+                    if (app.uiVisible) {
+                        android.util.Log.i(TAG, "app foreground — service held (interactive teardown on onStop)")
+                    } else {
+                        stopSelf(startId)
+                    }
                 }
             }
         }
@@ -85,11 +109,7 @@ class SyncWindowService : Service() {
     }
 
     private fun effectiveBase(): String =
-        (application as KompaktApplication).container.let { c ->
-            c.enrollment.activeBaseUrl()?.let { base ->
-                TransportPolicy.resolve(base, tunnelConfigured = true)
-            } ?: "http://${TransportPolicy.TUNNEL_HOST}:8650"
-        }
+        (application as KompaktApplication).container.effectiveBase()
 
     /** Window burst: pull unseen inbox + flush parked captures. */
     private suspend fun runBurst(container: dev.magnor.kompakt.data.AppContainer) {
@@ -115,10 +135,24 @@ class SyncWindowService : Service() {
     override fun onDestroy() {
         // Process death mid-window: the alarm re-arms the next one; a
         // stuck-up tunnel is cleaned by wg timeout + next window's down().
+        // T-050: (a) generation-guarded — a destroying old service instance
+        // must not kill a newer window's tunnel; (b) foreground-guarded —
+        // same interactive-contract rule as the background window; (c)
+        // teardown completes BEFORE scope.cancel() — the old cancel-while-
+        // down() race logged a JobCancellationException at the end of every
+        // successful window.
         (application as? KompaktApplication)?.let { app ->
-            scope.launch { runCatching { app.tunnelController.down() } }
-        }
-        scope.cancel()
+            val gen = app.tunnelController.generation
+            val foreground = app.uiVisible
+            scope.launch {
+                if (!foreground) {
+                    runCatching { app.tunnelController.down(expectedGeneration = gen) }
+                } else {
+                    android.util.Log.i(TAG, "onDestroy: app foreground — teardown left to interactive path")
+                }
+                scope.cancel()
+            }
+        } ?: scope.cancel()
         super.onDestroy()
     }
 

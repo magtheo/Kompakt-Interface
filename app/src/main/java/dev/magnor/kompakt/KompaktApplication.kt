@@ -31,14 +31,51 @@ class KompaktApplication : Application() {
      */
     val tunnelController: TunnelController by lazy { TunnelController(this) }
 
+    /**
+     * T-050: MainActivity resumed — set in onStart/onStop. The foreground
+     * app owns the tunnel: background windows skip their teardown while
+     * this is true, and the HttpApi gate may actively re-raise the tunnel.
+     * Teardown-on-leave is preserved (MainActivity.onStop → ACTION_STOP).
+     */
+    @Volatile
+    var uiVisible: Boolean = false
+        private set
+
+    fun setUiVisible(visible: Boolean) {
+        if (uiVisible != visible) android.util.Log.i(TAG, "ui ${if (visible) "visible" else "hidden"}")
+        uiVisible = visible
+    }
+
     val container: AppContainer by lazy {
         AppContainer(
             secretVault = KeystoreSecretVault(this),
             captureQueueDir = java.io.File(filesDir, "captures"),
             themeStore = ThemeStore(java.io.File(filesDir, "theme.txt")),
             tunnelConfigured = tunnelController.isConfigured,
-            tunnelGate = dev.magnor.kompakt.data.remote.TunnelGate { tunnelController.awaitReady(it) },
+            tunnelGate = dev.magnor.kompakt.data.remote.TunnelGate { timeoutMs ->
+                if (tunnelController.awaitReady(timeoutMs - RAISE_BUDGET_MS.coerceAtMost(timeoutMs))) {
+                    return@TunnelGate true
+                }
+                // T-050 ACTIVE gate: transport failed with the tunnel Down
+                // and nothing raising. The old passive fail-fast turned a
+                // fetch that raced a mid-flight teardown into a permanent
+                // "server unreachable" until a full app restart (Sep 26
+                // diagnosis, race 3). With the UI visible we raise the
+                // tunnel ourselves, bounded by RAISE_BUDGET_MS so the
+                // caller's overall timeout still holds.
+                if (!uiVisible || !tunnelController.isConfigured) return@TunnelGate false
+                kotlinx.coroutines.withTimeoutOrNull(RAISE_BUDGET_MS) {
+                    tunnelController.up(container.effectiveBase())
+                } ?: false
+            },
         )
+    }
+
+    private companion object {
+        const val TAG = "KompaktApp"
+
+        /** Active-gate raise budget — must fit inside HttpApi's 50 s gate timeout. */
+        const val RAISE_BUDGET_MS = 20_000L
     }
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

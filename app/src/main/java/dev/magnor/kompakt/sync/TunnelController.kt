@@ -48,6 +48,16 @@ class TunnelController(private val context: Context) {
     private val _state = MutableStateFlow<State>(State.Down)
     val state: StateFlow<State> = _state.asStateFlow()
 
+    /**
+     * T-050: window generation — bumped by every up() while holding the
+     * mutex. Teardowns capture it and pass it to [down]; a down() whose
+     * captured generation is stale is a no-op, so a stop queued before a
+     * newer raise (fast close→reopen) can never kill the fresh tunnel.
+     */
+    @Volatile
+    var generation: Long = 0
+        private set
+
     private val mutex = Mutex()
     private var backend: GoBackend? = null
     private var parsed: ParsedConfig? = null
@@ -103,6 +113,7 @@ class TunnelController(private val context: Context) {
         budgetMs: Long = 45_000,
         now: () -> Long = { System.currentTimeMillis() },
     ): Boolean = mutex.withLock {
+        generation += 1
         val cfg = loadParsed() ?: run {
             Log.w(TAG, "up(): tunnel.conf missing/unparseable — not configured")
             return false
@@ -139,10 +150,20 @@ class TunnelController(private val context: Context) {
         false
     }
 
-    /** Tunnel down — always safe to call. */
-    suspend fun down() = mutex.withLock {
+    /**
+     * Tunnel down — always safe to call. T-050: pass the [expectedGeneration]
+     * captured when the teardown was DECIDED; if a newer up() has started
+     * since, the teardown is stale and is skipped (returns false). Null
+     * means unconditional (background-window cleanup).
+     */
+    suspend fun down(expectedGeneration: Long? = null): Boolean = mutex.withLock {
+        if (expectedGeneration != null && expectedGeneration != generation) {
+            Log.i(TAG, "down(gen=$expectedGeneration) superseded by gen=$generation — teardown skipped")
+            return false
+        }
         quietlyDown()
         _state.value = State.Down
+        true
     }
 
     private suspend fun quietlyDown() {

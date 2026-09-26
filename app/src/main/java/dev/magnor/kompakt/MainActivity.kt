@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
         // Unconditional — independent of tunnel state.
         runCatching { DayWidgetProvider.push(this) }
         val app = application as KompaktApplication
+        app.setUiVisible(true) // T-050: foreground app owns the tunnel
         if (!app.tunnelController.isConfigured) return
         // Consent ask BEFORE the remoteActiveFlow gate: after a crash
         // restart the enrollment state may not be loaded yet, and
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         val app = application as KompaktApplication
+        app.setUiVisible(false) // T-050: before ACTION_STOP so teardown sees it
         if (app.tunnelController.isConfigured) {
             runCatching { SyncWindowService.stop(this) }
         }
