@@ -3,6 +3,7 @@ package dev.magnor.kompakt.data
 import dev.magnor.kompakt.data.fake.FakeAgentRepository
 import dev.magnor.kompakt.data.fake.FakeCaptureRepository
 import dev.magnor.kompakt.sync.TransportPolicy
+import dev.magnor.kompakt.sync.TunnelController
 import dev.magnor.kompakt.data.fake.FakeChangeLog
 import dev.magnor.kompakt.data.fake.FakeChatRepository
 import dev.magnor.kompakt.data.fake.FakeData
@@ -139,6 +140,10 @@ class AppContainer(
     // T-044: handed to every HttpApi the container builds — retries a
     // transport-failed call once the tunnel raise lands.
     private val tunnelGate: dev.magnor.kompakt.data.remote.TunnelGate? = null,
+    // T-051 (W2): the tunnel's dial phase, injected by KompaktApplication
+    // (the TunnelController owner — it holds the Context the controller
+    // dials with). Null flow when no tunnel.conf exists.
+    tunnelPhase: StateFlow<TunnelController.State?>? = null,
 ) {
     /** Ink polarity (Light/Inverted) — file-backed, process-lifetime. */
     val themeStore: ThemeStore =
@@ -419,6 +424,16 @@ class AppContainer(
 
     private val idleTransportStatus: StateFlow<TransportStatus> =
         MutableStateFlow(TransportStatus.Idle).asStateFlow()
+
+    /**
+     * T-051 (W2): tunnel dial phase for honest loading subtitles —
+     * requests read Down while the (cold) dial is in progress and Up
+     * once the path carries traffic. Element is null when no tunnel is
+     * configured (fake mode / plain remote): no dial can happen, so
+     * screens must not claim "Connecting".
+     */
+    val tunnelState: StateFlow<TunnelController.State?> =
+        tunnelPhase ?: MutableStateFlow<TunnelController.State?>(null).asStateFlow()
 
     /** T-020: raw API for background paths (fallback worker). */
     fun remoteApi(): HttpApi? = remoteStack?.api

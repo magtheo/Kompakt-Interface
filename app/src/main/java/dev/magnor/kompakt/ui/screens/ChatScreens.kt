@@ -34,6 +34,7 @@ import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
+import dev.magnor.kompakt.sync.TunnelController
 import dev.magnor.kompakt.ui.LocalAppContainer
 import dev.magnor.kompakt.ui.MarkdownText
 import dev.magnor.kompakt.voice.MicButton
@@ -66,6 +67,9 @@ fun ChatListScreen(
     // composition-local route — see VoiceUi) distinguishes Offline from
     // Loading while the list fetches are in flight.
     val transport by LocalAppContainer.current.transportStatus.collectAsState()
+    // T-051 (W2): tunnel dial phase — the loading subtitle tells the user
+    // whether the wait is the (cold) dial or the fetch itself.
+    val tunnel by LocalAppContainer.current.tunnelState.collectAsState()
     var newChatExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(created) {
@@ -130,7 +134,10 @@ fun ChatListScreen(
                     title = "Offline — server unreachable",
                     subtitle = "Will load when connection returns",
                 )
-            !state.loaded -> ListRow(title = "Loading chats…")
+            !state.loaded -> ListRow(
+                title = "Loading chats…",
+                subtitle = tunnelPhaseSubtitle(tunnel),
+            )
             transport is TransportStatus.Degraded ->
                 ListRow(
                     title = "Offline — server unreachable",
@@ -172,6 +179,8 @@ fun ChatThreadScreen(
     // history fetch is in flight.
     val loaded by viewModel.loaded.collectAsState()
     val transport by LocalAppContainer.current.transportStatus.collectAsState()
+    // T-051 (W2): same dial-vs-fetch subtitle as the chat list.
+    val tunnel by LocalAppContainer.current.tunnelState.collectAsState()
     var scopeExpanded by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
@@ -311,7 +320,10 @@ fun ChatThreadScreen(
                                 title = "Offline — server unreachable",
                                 subtitle = "Will load when connection returns",
                             )
-                        !loaded -> ListRow(title = "Loading messages…")
+                        !loaded -> ListRow(
+                            title = "Loading messages…",
+                            subtitle = tunnelPhaseSubtitle(tunnel),
+                        )
                         else -> ListRow(title = "No messages", subtitle = "Write below")
                     }
                 }
@@ -399,6 +411,22 @@ fun ChatThreadScreen(
         },
     )
 }
+
+/**
+ * T-051 (W2): phase-aware subtitle for loading rows — distinguishes the
+ * 1–10 s cold tunnel dial ("Connecting") from the fetch itself. Tunnel
+ * reads Down while an up() is in progress, so "not Up" means the dial is
+ * still pending; Error is never assigned today but maps to Connecting
+ * too (still no path). Null = no tunnel configured (fake/plain-remote
+ * mode): no dial can happen, so nothing is claimed. Static text only
+ * (e-ink).
+ */
+private fun tunnelPhaseSubtitle(tunnel: TunnelController.State?): String? =
+    when (tunnel) {
+        null -> null
+        TunnelController.State.Up -> "Fetching"
+        else -> "Connecting — secure tunnel"
+    }
 
 /**
  * One message. Monochrome sender coding: user = right-shifted bordered card,
