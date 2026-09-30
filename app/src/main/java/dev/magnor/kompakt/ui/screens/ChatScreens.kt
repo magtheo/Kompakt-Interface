@@ -29,10 +29,12 @@ import androidx.compose.ui.unit.sp
 import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
+import dev.magnor.kompakt.data.remote.TransportStatus
 import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
+import dev.magnor.kompakt.ui.LocalAppContainer
 import dev.magnor.kompakt.ui.MarkdownText
 import dev.magnor.kompakt.voice.MicButton
 import dev.magnor.kompakt.voice.VoiceStatusText
@@ -56,11 +58,14 @@ fun ChatListScreen(
         ChatListViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it::nextRequestId, it.now())
     },
 ) {
-    val threads by viewModel.threads.collectAsState()
+    val state by viewModel.state.collectAsState()
     val created by viewModel.created.collectAsState()
     val error by viewModel.error.collectAsState()
-    val topics by viewModel.topics.collectAsState()
-    val workspaces by viewModel.workspaces.collectAsState()
+
+    // T-051: transport health from the app container (established
+    // composition-local route — see VoiceUi) distinguishes Offline from
+    // Loading while the list fetches are in flight.
+    val transport by LocalAppContainer.current.transportStatus.collectAsState()
     var newChatExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(created) {
@@ -85,18 +90,18 @@ fun ChatListScreen(
                 newChatExpanded = false
                 viewModel.newChat()
             }
-            if (topics.isNotEmpty()) {
+            if (state.topics.isNotEmpty()) {
                 SectionLabel("Topics")
-                topics.forEach { topic ->
+                state.topics.forEach { topic ->
                     ListRow(title = topic.label) {
                         newChatExpanded = false
                         viewModel.newChat("topic", topic.id)
                     }
                 }
             }
-            if (workspaces.isNotEmpty()) {
+            if (state.workspaces.isNotEmpty()) {
                 SectionLabel("Workspaces")
-                workspaces.forEach { workspace ->
+                state.workspaces.forEach { workspace ->
                     ListRow(title = workspace.label, subtitle = workspace.ref) {
                         newChatExpanded = false
                         viewModel.newChat("workspace", workspace.ref)
@@ -105,10 +110,13 @@ fun ChatListScreen(
             }
         }
         error?.let { ListRow(title = it, trailing = "!") }
-        if (threads.isEmpty()) {
-            ListRow(title = "No chats yet", subtitle = "Tap New chat above")
-        } else {
-            threads.forEach { thread ->
+        // T-051 tri-state: Loading / Offline / genuine "No chats yet" — never
+        // a false empty while the fetches are in flight or the tunnel is down.
+        // D037: degradeTransport swallows offline failures into empty
+        // emissions, so loaded+empty+Degraded may be a fake empty —
+        // honest-first shows Offline instead of an empty list we can't confirm.
+        when {
+            state.threads.isNotEmpty() -> state.threads.forEach { thread ->
                 ListRow(
                     title = thread.title,
                     subtitle = listOfNotNull(thread.scopeLabel, thread.lastMessagePreview)
@@ -117,6 +125,18 @@ fun ChatListScreen(
                     onClick = { onOpenThread(thread.id) },
                 )
             }
+            !state.loaded && transport is TransportStatus.Degraded ->
+                ListRow(
+                    title = "Offline — server unreachable",
+                    subtitle = "Will load when connection returns",
+                )
+            !state.loaded -> ListRow(title = "Loading chats…")
+            transport is TransportStatus.Degraded ->
+                ListRow(
+                    title = "Offline — server unreachable",
+                    subtitle = "Can't confirm empty while offline",
+                )
+            else -> ListRow(title = "No chats yet", subtitle = "Tap New chat above")
         }
     }
 }

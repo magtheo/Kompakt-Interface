@@ -65,18 +65,6 @@ class ChatListViewModel(
     ) { t, tp, w -> ChatListUiState(loaded = true, threads = t, topics = tp, workspaces = w) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatListUiState())
 
-    // T-051: superseded by `state` above; kept unchanged until Task 4 points
-    // ChatListScreen at the combined UiState and drops these.
-    val threads: StateFlow<List<ChatThread>> = chatRepository.observeThreads()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** T-022d: reference data for the new-chat scope picker. */
-    val topics: StateFlow<List<ChatTopic>> = topicRepository.observeTopics()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val workspaces: StateFlow<List<Workspace>> = workspaceRepository.observeWorkspaces()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
     private val _created = MutableStateFlow<EntityId?>(null)
 
     /** New-thread id — the screen consumes it for navigation, then nulls it. */
