@@ -45,6 +45,28 @@ class ChatListViewModel(
     private val newRequestId: () -> RequestId,
     val now: Instant,
 ) : ViewModel() {
+
+    /**
+     * T-051: one honest list state (T-024 pattern). `combine` waits for all
+     * three one-shot fetches, so `loaded` flips only when the list is
+     * actually renderable — Loading, never a false "No chats yet" mid-fetch.
+     */
+    data class ChatListUiState(
+        val loaded: Boolean = false,
+        val threads: List<ChatThread> = emptyList(),
+        val topics: List<ChatTopic> = emptyList(),
+        val workspaces: List<Workspace> = emptyList(),
+    )
+
+    val state: StateFlow<ChatListUiState> = combine(
+        chatRepository.observeThreads(),
+        topicRepository.observeTopics(),
+        workspaceRepository.observeWorkspaces(),
+    ) { t, tp, w -> ChatListUiState(loaded = true, threads = t, topics = tp, workspaces = w) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatListUiState())
+
+    // T-051: superseded by `state` above; kept unchanged until Task 4 points
+    // ChatListScreen at the combined UiState and drops these.
     val threads: StateFlow<List<ChatThread>> = chatRepository.observeThreads()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
