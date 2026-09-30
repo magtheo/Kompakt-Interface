@@ -24,10 +24,12 @@ import androidx.compose.ui.unit.dp
 import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.buttons.OutlinedButtonMMD
 import com.mudita.mmd.components.text.TextMMD
+import dev.magnor.kompakt.data.remote.TransportStatus
 import dev.magnor.kompakt.domain.CalendarEvent
 import dev.magnor.kompakt.domain.CalendarInfo
 import dev.magnor.kompakt.domain.MonthGrid
 import dev.magnor.kompakt.ui.CalendarZone
+import dev.magnor.kompakt.ui.LocalAppContainer
 import dev.magnor.kompakt.ui.inCalendarZone
 import dev.magnor.kompakt.ui.viewmodels.CalendarViewModel
 import dev.magnor.kompakt.ui.viewmodels.EventViewModel
@@ -50,6 +52,11 @@ fun CalendarScreen(
     onNewEvent: (LocalDate) -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
+
+    // T-051: transport health from the app container (established
+    // composition-local route — see VoiceUi) distinguishes Offline from
+    // Loading while the window fetch is in flight.
+    val transport by LocalAppContainer.current.transportStatus.collectAsState()
 
     AppScreen(
         title = "Calendar",
@@ -99,14 +106,14 @@ fun CalendarScreen(
         }
 
         // Day agenda under the grid — the selected day's events.
+        // T-051 tri-state: Loading / Offline / genuine "No events" — never a
+        // false empty while a window fetch is in flight or the tunnel is down.
         val selected = state.selectedDay
         if (selected != null) {
             SectionLabel(dayLabel(selected))
             val events = state.eventsOn(selected)
-            if (events.isEmpty()) {
-                TextMMD("No events")
-            } else {
-                events.forEach { event ->
+            when {
+                events.isNotEmpty() -> events.forEach { event ->
                     ListRow(
                         title = event.title,
                         subtitle = eventRange(event),
@@ -114,6 +121,13 @@ fun CalendarScreen(
                         onClick = { onOpenEvent(event.id) },
                     )
                 }
+                !state.loaded && transport is TransportStatus.Degraded ->
+                    ListRow(
+                        title = "Offline — server unreachable",
+                        subtitle = "Will load when connection returns",
+                    )
+                !state.loaded -> ListRow(title = "Loading events…")
+                else -> TextMMD("No events")
             }
             OutlinedButtonMMD(
                 onClick = { onNewEvent(selected) },
