@@ -166,6 +166,12 @@ fun ChatThreadScreen(
     val proposedTopic by viewModel.proposedTopic.collectAsState()
     val topics by viewModel.topics.collectAsState()
     val workspaces by viewModel.workspaces.collectAsState()
+
+    // T-051: transport health from the app container (same route as the
+    // chat list) distinguishes Offline from Loading while this thread's
+    // history fetch is in flight.
+    val loaded by viewModel.loaded.collectAsState()
+    val transport by LocalAppContainer.current.transportStatus.collectAsState()
     var scopeExpanded by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
@@ -290,7 +296,25 @@ fun ChatThreadScreen(
                 }
             }
             if (messages.isEmpty()) {
-                item(key = "empty") { ListRow(title = "No messages", subtitle = "Write below") }
+                // T-051 tri-state: Loading / Offline / genuine "No messages" —
+                // never a false empty while the history fetch is in flight or
+                // the tunnel is down. Only renders when the transcript is
+                // empty, so existing conversations are untouched (sticky
+                // loaded also prevents a post-send refetch flash). Unlike the
+                // chat LIST there is no Degraded-empty amendment here: a
+                // zero-message thread is rare and the composer still renders,
+                // transport honesty is covered on the next open (b).
+                item(key = "empty") {
+                    when {
+                        !loaded && transport is TransportStatus.Degraded ->
+                            ListRow(
+                                title = "Offline — server unreachable",
+                                subtitle = "Will load when connection returns",
+                            )
+                        !loaded -> ListRow(title = "Loading messages…")
+                        else -> ListRow(title = "No messages", subtitle = "Write below")
+                    }
+                }
             }
             itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
                 val isLast = index == messages.lastIndex
