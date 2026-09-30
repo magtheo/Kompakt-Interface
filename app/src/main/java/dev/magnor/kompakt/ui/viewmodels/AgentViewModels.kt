@@ -25,6 +25,7 @@ import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.TaskDraft
 import dev.magnor.kompakt.domain.Workspace
+import dev.magnor.kompakt.ui.userMessage
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -52,11 +54,29 @@ class AgentsListViewModel(
     agentRepository: AgentRepository,
     val now: Instant,
 ) : ViewModel() {
-    val surface: StateFlow<AgentsSurface> = agentRepository.observeSurface()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AgentsSurface())
 
-    val runs: StateFlow<List<AgentRun>> = agentRepository.observeRuns()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /**
+     * T-051: one honest list state (T-024 pattern). `combine` waits for both
+     * cold one-shot fetches, so `loaded` flips only when the screen's data is
+     * actually renderable — Loading/Offline rows, never a false "No backends
+     * configured" mid-fetch. Transport failures are degraded to empty lists
+     * at the repository boundary (Sept-2 invariant, D037); anything that
+     * still throws lands in `error` with `loaded` untouched, so the Offline
+     * row wins over a false empty.
+     */
+    data class AgentsUiState(
+        val loaded: Boolean = false,
+        val surface: AgentsSurface = AgentsSurface(),
+        val runs: List<AgentRun> = emptyList(),
+        val error: String? = null,
+    )
+
+    val state: StateFlow<AgentsUiState> = combine(
+        agentRepository.observeSurface(),
+        agentRepository.observeRuns(),
+    ) { surface, runs -> AgentsUiState(loaded = true, surface = surface, runs = runs) }
+        .catch { e -> emit(AgentsUiState(error = e.userMessage())) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AgentsUiState())
 }
 
 /**

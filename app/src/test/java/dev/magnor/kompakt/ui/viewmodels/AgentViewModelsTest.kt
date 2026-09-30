@@ -17,6 +17,7 @@ import dev.magnor.kompakt.domain.AgentRunResult
 import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.AgentsSurface
 import dev.magnor.kompakt.domain.Area
+import dev.magnor.kompakt.domain.OfflineException
 import dev.magnor.kompakt.domain.ChatThreadDraft
 import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.EntityKind
@@ -33,7 +34,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -44,6 +47,7 @@ import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -520,6 +524,126 @@ class AgentRunDetailViewModelTest {
         advanceTimeBy(20_000)
 
         assertTrue("settled session must be sendable", vm.canSend.value)
+        collector.cancel()
+    }
+}
+
+/**
+ * T-051: the agents list exposes ONE combined UiState (T-024 pattern) over
+ * the two cold one-shot observe fetches. `loaded` flips only once both have
+ * landed, so the screen can tell Loading/Offline from a genuinely empty
+ * surface and never renders a false "No backends configured" mid-fetch.
+ * Fakes bypass `degradeTransport` (D037 degrades transport at the repository
+ * boundary), so the offline path stays observable here.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+class AgentsListViewModelTest {
+
+    /**
+     * Cold one-shot sources mirroring ChatListViewModelTest's fakes: `null`
+     * = fetch still in flight (nothing emitted — tunnel dial), a flow = the
+     * landed snapshot. Everything else delegates to ColdAgentRepository.
+     */
+    private class ColdAgentListSources(
+        private val surface: Flow<AgentsSurface>? = null,
+        private val runs: Flow<List<AgentRun>>? = null,
+    ) : AgentRepository by ColdAgentRepository(AgentsSurface(), mutableListOf()) {
+        override fun observeSurface(): Flow<AgentsSurface> = surface ?: emptyFlow()
+        override fun observeRuns(): Flow<List<AgentRun>> = runs ?: emptyFlow()
+    }
+
+    private val t0 = Instant.parse("2026-08-23T12:00:00Z")
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+
+    private fun surface() = AgentsSurface(
+        backends = mapOf(
+            "opencode" to AgentBackendInfo(name = "opencode", resumable = true, commands = true),
+        ),
+        agents = listOf(AgentRole(name = "build", description = "Build role", backend = "opencode")),
+        defaultBackend = "opencode",
+    )
+
+    private fun run(id: String) = AgentRun(
+        id = id, backend = "opencode", kind = AgentRunKind.SESSION, agent = "build",
+        state = AgentRunState.SUCCEEDED, title = "Run $id", createdAt = t0, updatedAt = t0,
+    )
+
+    @Test
+    fun `loaded starts false while the surface and runs fetches are in flight`() = runTest {
+        val vm = AgentsListViewModel(ColdAgentListSources(), t0)
+        val collector = launch(UnconfinedTestDispatcher()) { vm.state.collect { } }
+
+        // In flight: the list must say Loading, never a false "No backends
+        // configured" / "Nothing running".
+        assertFalse(vm.state.value.loaded)
+        collector.cancel()
+    }
+
+    @Test
+    fun `loaded stays false until both the surface and runs fetches land`() = runTest {
+        val vm = AgentsListViewModel(
+            ColdAgentListSources(surface = flowOf(surface())), // surface landed…
+            t0,
+        ) // …runs still in flight — combine must wait
+        val collector = launch(UnconfinedTestDispatcher()) { vm.state.collect { } }
+
+        assertFalse(vm.state.value.loaded)
+        collector.cancel()
+    }
+
+    @Test
+    fun `loaded flips true with the surface and runs once both land`() = runTest {
+        val vm = AgentsListViewModel(
+            ColdAgentListSources(surface = flowOf(surface()), runs = flowOf(listOf(run("ses_1")))),
+            t0,
+        )
+        val collector = launch(UnconfinedTestDispatcher()) { vm.state.collect { } }
+
+        val state = vm.state.value
+        assertTrue(state.loaded)
+        assertEquals("opencode", state.surface.defaultBackend)
+        assertEquals(listOf("ses_1"), state.runs.map { it.id })
+        collector.cancel()
+    }
+
+    @Test
+    fun `loaded stays false when the fetch fails offline`() = runTest {
+        val offline = flow<AgentsSurface> { throw OfflineException(RuntimeException("no route")) }
+        val vm = AgentsListViewModel(
+            ColdAgentListSources(surface = offline, runs = flowOf(emptyList())),
+            t0,
+        )
+        val collector = launch(UnconfinedTestDispatcher()) { vm.state.collect { } }
+
+        // Offline: the list shows the Offline row (with degraded transport),
+        // never a false "No backends configured"; the error line carries it.
+        assertFalse(vm.state.value.loaded)
+        assertNotNull(vm.state.value.error)
+        collector.cancel()
+    }
+
+    @Test
+    fun `an emitted empty surface is loaded and genuinely empty`() = runTest {
+        val vm = AgentsListViewModel(
+            ColdAgentListSources(surface = flowOf(AgentsSurface()), runs = flowOf(emptyList())),
+            t0,
+        )
+        val collector = launch(UnconfinedTestDispatcher()) { vm.state.collect { } }
+
+        // Fetch landed: honest empty — "No backends configured" is now true.
+        val state = vm.state.value
+        assertTrue(state.loaded)
+        assertTrue(state.surface.backends.isEmpty())
+        assertTrue(state.runs.isEmpty())
         collector.cancel()
     }
 }

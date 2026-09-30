@@ -28,12 +28,14 @@ import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.buttons.OutlinedButtonMMD
 import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
+import dev.magnor.kompakt.data.remote.TransportStatus
 import dev.magnor.kompakt.domain.AgentBackendInfo
 import dev.magnor.kompakt.domain.AgentEvent
 import dev.magnor.kompakt.domain.AgentRole
 import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.AgentRunKind
 import dev.magnor.kompakt.domain.AgentRunState
+import dev.magnor.kompakt.ui.LocalAppContainer
 import dev.magnor.kompakt.ui.MarkdownText
 import dev.magnor.kompakt.voice.MicButton
 import dev.magnor.kompakt.voice.VoiceStatusText
@@ -81,74 +83,94 @@ fun AgentsListScreen(
     onOpenInbox: () -> Unit,
     viewModel: AgentsListViewModel = containerViewModel { AgentsListViewModel(it.agentRepository, it.now()) },
 ) {
-    val surface by viewModel.surface.collectAsState()
-    val runs by viewModel.runs.collectAsState()
+    val state by viewModel.state.collectAsState()
+
+    // T-051: transport health from the app container (established
+    // composition-local route — see VoiceUi) distinguishes Offline from
+    // Loading while the surface/runs fetches are in flight.
+    val transport by LocalAppContainer.current.transportStatus.collectAsState()
 
     AppScreen(title = "Agents") {
-        SectionLabel("Backends")
-        if (surface.backends.isEmpty()) {
-            ListRow(title = "No backends configured")
-        } else {
-            surface.backends.forEach { (name, info) ->
+        // T-051 tri-state: Loading / Offline / genuine empties — never a
+        // false "No backends configured" while a fetch is in flight or the
+        // tunnel is down.
+        when {
+            !state.loaded && transport is TransportStatus.Degraded ->
                 ListRow(
-                    title = name + if (name == surface.defaultBackend) " (default)" else "",
-                    subtitle = capSummary(info),
+                    title = "Offline — server unreachable",
+                    subtitle = "Will load when connection returns",
                 )
+            !state.loaded -> ListRow(title = "Loading agents…")
+            else -> {
+                val surface = state.surface
+                val runs = state.runs
+
+                SectionLabel("Backends")
+                if (surface.backends.isEmpty()) {
+                    ListRow(title = "No backends configured")
+                } else {
+                    surface.backends.forEach { (name, info) ->
+                        ListRow(
+                            title = name + if (name == surface.defaultBackend) " (default)" else "",
+                            subtitle = capSummary(info),
+                        )
+                    }
+                }
+
+                SectionLabel("Workers")
+                if (surface.agents.isEmpty()) {
+                    ListRow(title = "No agents configured")
+                } else {
+                    surface.agents.forEach { role ->
+                        ListRow(
+                            title = role.name,
+                            subtitle = role.description,
+                            trailing = "@${role.backend}",
+                            onClick = { onOpenAgent(role.backend, role.name) },
+                        )
+                    }
+                }
+
+                SectionLabel("Attention")
+                val waiting = runs.count { it.state == AgentRunState.WAITING_FOR_INPUT }
+                if (waiting > 0) {
+                    ListRow(
+                        title = "$waiting ${if (waiting == 1) "run" else "runs"} waiting for input",
+                        trailing = "!",
+                        onClick = onOpenInbox,
+                    )
+                } else {
+                    ListRow(title = "No runs need input")
+                }
+
+                SectionLabel("Live runs")
+                val live = runs.filter { !it.state.isTerminal }
+                if (live.isEmpty()) {
+                    ListRow(title = "Nothing running")
+                } else {
+                    live.forEach { run ->
+                        ListRow(
+                            title = run.displayTitle,
+                            subtitle = "${run.backend}/${run.agent} · ${run.kind.wire}",
+                            trailing = runGlyph(run.state),
+                            onClick = { onOpenRun(run.id) },
+                        )
+                    }
+                }
+
+                SectionLabel("Recent")
+                runs.filter { it.state.isTerminal }.take(5).forEach { run ->
+                    ListRow(
+                        title = run.displayTitle,
+                        subtitle = run.resultSummary ?: run.prompt,
+                        trailing = runGlyph(run.state),
+                        onClick = { onOpenRun(run.id) },
+                    )
+                }
+                if (runs.all { !it.state.isTerminal } && runs.isEmpty()) {
+                    ListRow(title = "No finished runs yet")
+                }
             }
-        }
-
-        SectionLabel("Workers")
-        if (surface.agents.isEmpty()) {
-            ListRow(title = "No agents configured")
-        } else {
-            surface.agents.forEach { role ->
-                ListRow(
-                    title = role.name,
-                    subtitle = role.description,
-                    trailing = "@${role.backend}",
-                    onClick = { onOpenAgent(role.backend, role.name) },
-                )
-            }
-        }
-
-        SectionLabel("Attention")
-        val waiting = runs.count { it.state == AgentRunState.WAITING_FOR_INPUT }
-        if (waiting > 0) {
-            ListRow(
-                title = "$waiting ${if (waiting == 1) "run" else "runs"} waiting for input",
-                trailing = "!",
-                onClick = onOpenInbox,
-            )
-        } else {
-            ListRow(title = "No runs need input")
-        }
-
-        SectionLabel("Live runs")
-        val live = runs.filter { !it.state.isTerminal }
-        if (live.isEmpty()) {
-            ListRow(title = "Nothing running")
-        } else {
-            live.forEach { run ->
-                ListRow(
-                    title = run.displayTitle,
-                    subtitle = "${run.backend}/${run.agent} · ${run.kind.wire}",
-                    trailing = runGlyph(run.state),
-                    onClick = { onOpenRun(run.id) },
-                )
-            }
-        }
-
-        SectionLabel("Recent")
-        runs.filter { it.state.isTerminal }.take(5).forEach { run ->
-            ListRow(
-                title = run.displayTitle,
-                subtitle = run.resultSummary ?: run.prompt,
-                trailing = runGlyph(run.state),
-                onClick = { onOpenRun(run.id) },
-            )
-        }
-        if (runs.all { !it.state.isTerminal } && runs.isEmpty()) {
-            ListRow(title = "No finished runs yet")
         }
     }
 }
