@@ -10,7 +10,12 @@ import dev.magnor.kompakt.domain.RevisionConflictException
 import dev.magnor.kompakt.domain.ServerUnavailableException
 import dev.magnor.kompakt.domain.UnauthorizedException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Instant
+import kotlin.time.Clock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.decodeFromString
@@ -57,6 +62,24 @@ fun interface TunnelGate {
     suspend fun awaitReady(timeoutMs: Long): Boolean
 }
 
+/**
+ * T-051: app-scoped transport health, fed from [HttpApi.execute] — the
+ * single choke point every request passes. Screens distinguish "offline"
+ * from "genuinely empty" without touching repository signatures;
+ * `degradeTransport`'s swallow of transport failures (Sept-2 invariant)
+ * stays untouched — this status rides alongside, never replaces.
+ */
+sealed interface TransportStatus {
+    /** No request has completed yet. */
+    data object Idle : TransportStatus
+
+    /** Last request succeeded. */
+    data object Ok : TransportStatus
+
+    /** Last transport-class failure (offline / 5xx): when + one short line. */
+    data class Degraded(val at: Instant, val cause: String) : TransportStatus
+}
+
 class HttpApi(
     baseUrl: String,
     private val tokenProvider: () -> String?,
@@ -67,6 +90,18 @@ class HttpApi(
 
     /** Read-only token access for sibling transports (T-019 alert stream). */
     fun token(): String? = tokenProvider()
+
+    /** T-051: transport health — see [TransportStatus]. */
+    private val _transport = MutableStateFlow<TransportStatus>(TransportStatus.Idle)
+    val transport: StateFlow<TransportStatus> = _transport.asStateFlow()
+
+    /**
+     * Status updates must NEVER throw and break request handling
+     * (hard invariant, Sept-2 crash class) — always best-effort.
+     */
+    private fun markTransport(status: TransportStatus) {
+        runCatching { _transport.value = status }
+    }
 
     val base: HttpUrl = baseUrl.toHttpUrlOrNull()
         ?: throw IllegalArgumentException("invalid server URL: $baseUrl")
@@ -180,7 +215,25 @@ class HttpApi(
         return builder.build()
     }
 
+    /**
+     * T-051: every request passes here — record transport health on the
+     * way out. Ok on a successful return (including a T-044 retry that
+     * landed after the tunnel raised); Degraded on transport-class
+     * failures, then rethrow unchanged so callers see the same taxonomy.
+     */
     private suspend fun execute(request: Request, timeoutSeconds: Long? = null): String =
+        try {
+            executeWithRetry(request, timeoutSeconds)
+                .also { markTransport(TransportStatus.Ok) }
+        } catch (e: OfflineException) {
+            markTransport(TransportStatus.Degraded(Clock.System.now(), e.message ?: "offline"))
+            throw e
+        } catch (e: ServerUnavailableException) {
+            markTransport(TransportStatus.Degraded(Clock.System.now(), e.message ?: "server unavailable"))
+            throw e
+        }
+
+    private suspend fun executeWithRetry(request: Request, timeoutSeconds: Long? = null): String =
         try {
             executeOnce(request, timeoutSeconds)
         } catch (e: OfflineException) {
