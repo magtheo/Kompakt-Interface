@@ -231,6 +231,60 @@ class AgentDetailViewModelTest {
         collector.cancel()
     }
 
+    /**
+     * T-051: surface injectable — `null` = fetch still in flight (never
+     * lands), a throwing flow = dead fetch. Everything else delegates to
+     * ColdAgentRepository's cold one-shot semantics.
+     */
+    private class ColdSurfaceSources(
+        private val surfaceFlow: Flow<AgentsSurface>?,
+    ) : AgentRepository by ColdAgentRepository(AgentsSurface(), mutableListOf()) {
+        override fun observeSurface(): Flow<AgentsSurface> = surfaceFlow ?: emptyFlow()
+    }
+
+    // ---- T-051: honest load state on the surface fetch ----
+
+    @Test
+    fun `loaded starts false while the surface fetch is in flight`() = runTest {
+        val vm = AgentDetailViewModel(
+            ColdSurfaceSources(surfaceFlow = null), // fetch never lands
+            TestWorkspaceRepository(),
+            "opencode", "build",
+        ) { "req-1" }
+        val collector = launch(UnconfinedTestDispatcher()) { vm.loaded.collect { } }
+
+        // In flight: the screen must say Loading/Offline, never a false
+        // "Role not found on this backend".
+        assertFalse(vm.loaded.value)
+        collector.cancel()
+    }
+
+    @Test
+    fun `loaded flips true when the surface fetch lands`() = runTest {
+        val repo = ColdAgentRepository(surface(), mutableListOf())
+        val vm = AgentDetailViewModel(repo, TestWorkspaceRepository(), "opencode", "build") { "req-1" }
+        val collector = launch(UnconfinedTestDispatcher()) { vm.loaded.collect { } }
+
+        assertTrue(vm.loaded.value)
+        collector.cancel()
+    }
+
+    @Test
+    fun `loaded stays false when the surface fetch fails`() = runTest {
+        val failing = flow<AgentsSurface> { throw OfflineException(RuntimeException("no route")) }
+        val vm = AgentDetailViewModel(
+            ColdSurfaceSources(surfaceFlow = failing),
+            TestWorkspaceRepository(),
+            "opencode", "build",
+        ) { "req-1" }
+        val collector = launch(UnconfinedTestDispatcher()) { vm.loaded.collect { } }
+
+        // The chain died before landing — Loading/Offline, never a false
+        // "Role not found on this backend".
+        assertFalse(vm.loaded.value)
+        collector.cancel()
+    }
+
     @Test
     fun `dispatch carries the picked workspace ref into the draft`() = runTest {
         val repo = ColdAgentRepository(surface(), mutableListOf())
@@ -278,7 +332,7 @@ class AgentRunDetailViewModelTest {
     )
 
     private fun vm(
-        repo: ColdAgentRepository,
+        repo: AgentRepository,
         noteRepository: NoteRepository = unusedNoteRepo,
         organizationRepository: OrganizationRepository = unusedOrgRepo,
     ): AgentRunDetailViewModel =
@@ -291,6 +345,17 @@ class AgentRunDetailViewModelTest {
             runId = "ses_1",
             newRequestId = { "req-1" },
         )
+
+    /**
+     * T-051: observeRun injectable — `null` = fetch still in flight (never
+     * lands), a throwing flow = dead fetch. Everything else delegates to
+     * ColdAgentRepository's cold one-shot semantics.
+     */
+    private class ColdRunSources(
+        private val runFlow: Flow<AgentRun?>?,
+    ) : AgentRepository by ColdAgentRepository(AgentsSurface(), mutableListOf()) {
+        override fun observeRun(id: String): Flow<AgentRun?> = runFlow ?: emptyFlow()
+    }
 
     // Transitions (create task / discuss) are not under test here —
     // stubs throw if ever reached.
@@ -436,6 +501,40 @@ class AgentRunDetailViewModelTest {
 
         assertEquals(AgentRunState.CANCELLED, vm.run.value?.state)
         assertEquals("Cancelled", vm.feedback.value)
+        collector.cancel()
+    }
+
+    // ---- T-051: honest load state on the run fetch ----
+
+    @Test
+    fun `run loaded starts false while the run fetch is in flight`() = runTest {
+        val vm = vm(ColdRunSources(runFlow = null)) // observeRun never lands
+        val collector = launch(UnconfinedTestDispatcher()) { vm.loaded.collect { } }
+
+        // In flight: Loading/Offline, never a premature "Run not found".
+        assertFalse(vm.loaded.value)
+        collector.cancel()
+    }
+
+    @Test
+    fun `run loaded flips true when the run fetch lands`() = runTest {
+        val repo = ColdAgentRepository(surface(), mutableListOf(session(AgentRunState.SUCCEEDED)))
+        val vm = vm(repo)
+        val collector = launch(UnconfinedTestDispatcher()) { vm.loaded.collect { } }
+
+        assertTrue(vm.loaded.value)
+        collector.cancel()
+    }
+
+    @Test
+    fun `run loaded stays false when the run fetch fails`() = runTest {
+        val failing = flow<AgentRun?> { throw OfflineException(RuntimeException("no route")) }
+        val vm = vm(ColdRunSources(runFlow = failing))
+        val collector = launch(UnconfinedTestDispatcher()) { vm.loaded.collect { } }
+
+        // The chain died before landing — Loading/Offline, never a false
+        // "Run not found".
+        assertFalse(vm.loaded.value)
         collector.cancel()
     }
 
@@ -628,6 +727,29 @@ class AgentsListViewModelTest {
         // never a false "No backends configured"; the error line carries it.
         assertFalse(vm.state.value.loaded)
         assertNotNull(vm.state.value.error)
+        collector.cancel()
+    }
+
+    @Test
+    fun `a failure after data landed preserves the data and records the error`() = runTest {
+        // T-051 M1 (T-024 defensive form): the .catch must emit a copy of the
+        // landed state with only `error` set — a fresh default AgentsUiState
+        // would wipe the rows the screen is already showing.
+        val surfaceThenFailure = flow {
+            emit(surface())
+            throw OfflineException(RuntimeException("connection dropped"))
+        }
+        val vm = AgentsListViewModel(
+            ColdAgentListSources(surface = surfaceThenFailure, runs = flowOf(listOf(run("ses_1")))),
+            t0,
+        )
+        val collector = launch(UnconfinedTestDispatcher()) { vm.state.collect { } }
+
+        val state = vm.state.value
+        assertTrue(state.loaded)
+        assertEquals("opencode", state.surface.defaultBackend)
+        assertEquals(listOf("ses_1"), state.runs.map { it.id })
+        assertNotNull(state.error)
         collector.cancel()
     }
 
