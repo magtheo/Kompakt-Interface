@@ -156,3 +156,32 @@ Loading row subtitle becomes phase-aware: tunnel not Up → `"Connecting — sec
 ## Explicitly out of scope (follow-up plan T-052, needs its own approval)
 
 Snapshot cache (stale-while-revalidate: render last JSON instantly + "Updated HH:MM · refreshing…"), cache warming in idle sync windows (depends on fix A landing).
+
+---
+
+## Execution addendum (2026-09-30)
+
+Executed task-by-task via subagent-driven development (implementer + two-stage
+reviewer per task). All tasks APPROVED; suite 356 green; `scripts/verify.sh` OK.
+
+**Amendment to D037 (locked during execution):** on LIST screens, the empty
+branch is now transport-aware — `loaded && empty && Degraded` renders the
+Offline row ("Can't confirm empty while offline") instead of genuine-empty
+copy. Reason: `degradeTransport` swallows offline failures into empty
+emissions, so a landed empty list offline may be fake; honest-first. Chat
+THREAD deliberately excluded (composer always renders; rare case).
+
+**Commit map:** f36216e T1 · 7c462e6 T2 · 0ade032 T3 · 2ea759f T4 · 68b72cf T5
+· 3639c57 T6 · ec73b08 T7 · 11c3464 T8 · b72a2f0 T8b (detail loaded, error
+row, amended empty, catch-preserves) · 851606c T9 (tunnel-phase subtitle;
+flow injected via ctor — controller lives in KompaktApplication).
+
+**Accepted minors (follow-up tickets, none blocking):** Calendar month-nav
+can flash a false "No events" for days outside the loaded window mid-refetch;
+AgentDetail collects observeSurface a 3rd time (extra GET per entry); detail
+VM one-shot chains lack defensive catch (pre-existing); thread "No messages"
+gate ignores Degraded (per amendment scope); detail screens after non-transport
+throw retry only on screen re-entry.
+
+**Remaining:** device install + smoke (USB), merge, re-apply stashed
+unrelated CalendarScreens fix on main.
