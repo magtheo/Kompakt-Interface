@@ -15,8 +15,10 @@ import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
 import dev.magnor.kompakt.domain.Note
 import dev.magnor.kompakt.domain.NoteDraft
+import dev.magnor.kompakt.domain.OfflineException
 import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.Workspace
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +32,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -90,7 +93,17 @@ private class ColdChatRepository(
         threadFetches++
         emit(thread)
     }
-    override fun observeMessages(chatId: EntityId): Flow<List<Message>> = flow { emit(snapshot) }
+    /** T-051: counts cold observe fetches (one emission per collection). */
+    var messagesFetches = 0
+
+    /** T-051: gate/hook before each emission — suspend = fetch in flight, throw = fetch failed. */
+    var beforeMessagesEmit: suspend () -> Unit = { }
+
+    override fun observeMessages(chatId: EntityId): Flow<List<Message>> = flow {
+        messagesFetches++
+        beforeMessagesEmit()
+        emit(snapshot)
+    }
     override suspend fun getThread(id: EntityId): ChatThread? = thread
     override suspend fun createThread(draft: ChatThreadDraft, requestId: RequestId): ChatThread =
         throw UnsupportedOperationException()
@@ -508,5 +521,75 @@ class ChatThreadViewModelTest {
         vm.saveNote(msg("a1", MessageRole.ASSISTANT, "some reply"))
 
         assertTrue(vm.notice.value!!.startsWith("Note save failed"))
+    }
+
+    // ── T-051: honest load state (Loading/Offline vs false "No messages") ──
+
+    @Test
+    fun `loaded is false while the messages fetch is in flight`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        repo = ColdChatRepository(snapshot = emptyList())
+        repo.beforeMessagesEmit = { gate.await() } // cold dial: nothing landed yet
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes, "chat_1", { "req-l" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.loaded.collect { } }
+
+        // Loading — the transcript must never claim a fetched history yet.
+        assertFalse(vm.loaded.value)
+        collector.cancel()
+    }
+
+    @Test
+    fun `loaded flips true once the messages fetch lands`() = runTest {
+        repo = ColdChatRepository(snapshot = seededConversation())
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes, "chat_1", { "req-l" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.loaded.collect { } }
+
+        assertTrue(vm.loaded.value)
+        assertEquals(1, repo.messagesFetches)
+        collector.cancel()
+    }
+
+    @Test
+    fun `loaded stays true while a post-send refresh refetch is in flight`() = runTest {
+        repo = ColdChatRepository(snapshot = seededConversation())
+        repo.sendOutcome = { _, text ->
+            val user = msg("u3", MessageRole.USER, text)
+            val assistant = msg("a3", MessageRole.ASSISTANT, "reply to $text")
+            repo.snapshot = repo.snapshot + listOf(user, assistant)
+            ChatExchange(user, assistant)
+        }
+        val gate = CompletableDeferred<Unit>()
+        repo.beforeMessagesEmit = { if (repo.messagesFetches >= 2) gate.await() } // refetch hangs
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes, "chat_1", { "req-s" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.loaded.collect { } }
+        assertTrue(vm.loaded.value) // first fetch landed
+
+        vm.onDraftChange("hello again")
+        vm.send() // ack raises the refresh tick → refetch starts, gated in flight
+
+        // Sticky: the in-flight refetch must not flash Loading over the
+        // existing conversation (plan T-051, Calendar's sticky-loaded).
+        assertTrue(vm.loaded.value)
+        assertEquals(2, repo.messagesFetches)
+
+        gate.complete(Unit)
+        assertTrue(vm.loaded.value) // refetch landed — still true, no flicker
+        collector.cancel()
+    }
+
+    @Test
+    fun `loaded stays false when the first messages fetch fails offline`() = runTest {
+        // Fakes bypass degradeTransport: the observe call itself throws, as
+        // remote auth/protocol failures do — the VM must swallow it in the
+        // loaded chain rather than crash the sharing coroutine (D037:
+        // transport honesty is TransportStatus's job, screen-level).
+        repo = ColdChatRepository(snapshot = seededConversation())
+        repo.beforeMessagesEmit = { throw OfflineException(RuntimeException("no route")) }
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes, "chat_1", { "req-f" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.loaded.collect { } }
+
+        // Offline first open: Loading/Offline, never a false "No messages".
+        assertFalse(vm.loaded.value)
+        collector.cancel()
     }
 }
