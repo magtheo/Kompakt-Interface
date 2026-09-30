@@ -19,6 +19,7 @@ import dev.magnor.kompakt.data.fake.IdempotencyRegistry
 import dev.magnor.kompakt.data.remote.AlertTransport
 import dev.magnor.kompakt.data.remote.HttpApi
 import dev.magnor.kompakt.data.remote.SseAlertTransport
+import dev.magnor.kompakt.data.remote.TransportStatus
 import dev.magnor.kompakt.data.remote.RemoteCalendarRepository
 import dev.magnor.kompakt.data.repository.CalendarRepository
 import dev.magnor.kompakt.domain.CalendarEvent
@@ -93,6 +94,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlin.time.Clock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import java.util.UUID
@@ -405,6 +408,17 @@ class AppContainer(
     }
 
     val remoteActive: Boolean get() = remoteStack != null
+
+    /**
+     * T-051: transport health of the ACTIVE remote stack (every Switch*
+     * wrapper and the alert transport share that one HttpApi). Idle while
+     * unenrolled / fake mode — no request will ever land, nothing to report.
+     */
+    val transportStatus: StateFlow<TransportStatus>
+        get() = remoteStack?.api?.transport ?: idleTransportStatus
+
+    private val idleTransportStatus: StateFlow<TransportStatus> =
+        MutableStateFlow(TransportStatus.Idle).asStateFlow()
 
     /** T-020: raw API for background paths (fallback worker). */
     fun remoteApi(): HttpApi? = remoteStack?.api
