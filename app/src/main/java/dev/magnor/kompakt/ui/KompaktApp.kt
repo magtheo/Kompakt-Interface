@@ -44,6 +44,7 @@ import dev.magnor.kompakt.ui.screens.CalendarScreen
 import dev.magnor.kompakt.ui.screens.CaptureScreen
 import dev.magnor.kompakt.ui.screens.ChatListScreen
 import dev.magnor.kompakt.ui.screens.ChatThreadScreen
+import dev.magnor.kompakt.ui.screens.NewChatScreen
 import dev.magnor.kompakt.ui.screens.DiagnosticsScreen
 import dev.magnor.kompakt.ui.screens.EventDetailScreen
 import dev.magnor.kompakt.ui.screens.EventEditorScreen
@@ -193,6 +194,30 @@ private fun KompaktNavHost(launchRoute: String? = null, onRouteConsumed: () -> U
             composable(Routes.CHAT_LIST) {
                 ChatListScreen(
                     onOpenThread = { navController.navigate(Routes.chatThread(it)) },
+                    onNewChat = { type, ref, label ->
+                        navController.navigate(Routes.chatNew(type, ref, label))
+                    },
+                )
+            }
+            composable(
+                route = Routes.CHAT_NEW,
+                arguments = listOf(
+                    navArgument("scopeType") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("scopeRef") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("label") { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
+            ) { entry ->
+                NewChatScreen(
+                    scopeType = entry.arguments?.getString("scopeType"),
+                    scopeRef = entry.arguments?.getString("scopeRef"),
+                    label = entry.arguments?.getString("label"),
+                    onBack = { navController.popBackStack() },
+                    // Replace the draft screen: Back from the thread lands on the list.
+                    onCreated = { id ->
+                        navController.navigate(Routes.chatThread(id)) {
+                            popUpTo(Routes.CHAT_LIST)
+                        }
+                    },
                 )
             }
             composable(Routes.CHAT_THREAD) { entry ->

@@ -2,6 +2,7 @@ package dev.magnor.kompakt.ui.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.magnor.kompakt.data.PendingFirstMessages
 import dev.magnor.kompakt.data.repository.ChatRepository
 import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.data.repository.TopicRepository
@@ -42,7 +43,6 @@ class ChatListViewModel(
     private val chatRepository: ChatRepository,
     private val topicRepository: TopicRepository,
     private val workspaceRepository: WorkspaceRepository,
-    private val newRequestId: () -> RequestId,
     val now: Instant,
 ) : ViewModel() {
     val threads: StateFlow<List<ChatThread>> = chatRepository.observeThreads()
@@ -54,41 +54,80 @@ class ChatListViewModel(
 
     val workspaces: StateFlow<List<Workspace>> = workspaceRepository.observeWorkspaces()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+}
+
+/** State of the create-on-first-send step of an unsaved new chat. */
+sealed interface NewChatState {
+    data object Idle : NewChatState
+    data object Creating : NewChatState
+    data class Failed(val reason: String) : NewChatState
+}
+
+/**
+ * An unsaved new chat. Nothing exists server-side until the first send:
+ * [send] creates the thread (scope fixed at creation, T-022d), stashes the
+ * first message in [pendingFirstMessages] and publishes [created]; the
+ * thread screen then opens already sending it. Backing out before sending
+ * leaves no empty thread behind (there is no delete path yet, T-035).
+ *
+ * The create request id is minted once and reused across retries, so a
+ * lost response after a landed create cannot produce two threads (§11).
+ */
+class NewChatViewModel(
+    private val chatRepository: ChatRepository,
+    private val pendingFirstMessages: PendingFirstMessages,
+    private val scopeType: String?,
+    private val scopeRef: String?,
+    private val newRequestId: () -> RequestId,
+) : ViewModel() {
+    val draft = MutableStateFlow("")
+
+    private val _state = MutableStateFlow<NewChatState>(NewChatState.Idle)
+    val state: StateFlow<NewChatState> = _state.asStateFlow()
 
     private val _created = MutableStateFlow<EntityId?>(null)
 
     /** New-thread id — the screen consumes it for navigation, then nulls it. */
     val created: StateFlow<EntityId?> = _created.asStateFlow()
 
-    private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error.asStateFlow()
+    private var createRequestId: RequestId? = null
 
-    private var creating = false
+    fun onDraftChange(value: String) {
+        draft.value = value
+    }
 
-    /** T-022d: null scope = general chat; the picker passes its selection. */
-    fun newChat(scopeType: String? = null, scopeRef: String? = null) {
-        if (creating) return
-        creating = true
-        _error.value = null
+    fun send() {
+        val text = draft.value.trim()
+        if (text.isEmpty() || _state.value is NewChatState.Creating) return
+        _state.value = NewChatState.Creating
+        val requestId = createRequestId ?: newRequestId().also { createRequestId = it }
         viewModelScope.launch {
             runCatching {
                 chatRepository.createThread(
                     ChatThreadDraft(title = "New chat", scopeType = scopeType, scopeRef = scopeRef),
-                    newRequestId(),
+                    requestId,
                 )
             }.onSuccess { thread ->
+                pendingFirstMessages.put(thread.id, text)
+                draft.value = ""
+                _state.value = NewChatState.Idle
                 _created.value = thread.id
             }.onFailure { e ->
-                _error.value = e.message ?: "could not create chat"
+                // Draft stays in the composer; Send retries with the same request id.
+                _state.value = NewChatState.Failed(e.userMessage())
             }
-            creating = false
         }
+    }
+
+    fun dismissError() {
+        if (_state.value is NewChatState.Failed) _state.value = NewChatState.Idle
     }
 
     fun consumeCreated() {
         _created.value = null
     }
 }
+
 /**
  * Delivery state of the message currently being sent (static indicators only — e-ink). */
 sealed interface ChatSendState {
@@ -128,6 +167,8 @@ class ChatThreadViewModel(
     private val threadId: EntityId,
     private val newRequestId: () -> RequestId,
     private val now: () -> Instant,
+    /** First message handed over from the unsaved new-chat screen; sent on open. */
+    initialMessage: String? = null,
 ) : ViewModel() {
 
     private val refreshTick = MutableStateFlow(0)
@@ -178,6 +219,11 @@ class ChatThreadViewModel(
     private var retryRequestId: RequestId? = null
 
     init {
+        if (!initialMessage.isNullOrBlank()) {
+            draft.value = initialMessage
+            send()
+        }
+
         // V-063 pending-reply poll: while a workspace turn is unsettled the
         // thread wire carries pending_reply — each messages GET lets the
         // server catch up a turn that settled after its budget. Re-tick on a

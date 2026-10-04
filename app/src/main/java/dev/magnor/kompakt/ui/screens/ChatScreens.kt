@@ -25,6 +25,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,6 +48,8 @@ import dev.magnor.kompakt.ui.relativeTo
 import dev.magnor.kompakt.ui.timeOfDay
 import dev.magnor.kompakt.ui.viewmodels.ChatComposerMode
 import dev.magnor.kompakt.ui.viewmodels.ChatListViewModel
+import dev.magnor.kompakt.ui.viewmodels.NewChatViewModel
+import dev.magnor.kompakt.ui.viewmodels.NewChatState
 import dev.magnor.kompakt.ui.viewmodels.ChatSendState
 import dev.magnor.kompakt.ui.viewmodels.ChatThreadViewModel
 import kotlinx.coroutines.launch
@@ -54,23 +58,16 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatListScreen(
     onOpenThread: (EntityId) -> Unit,
+    /** Opens the unsaved new-chat screen; null scope = General. */
+    onNewChat: (scopeType: String?, scopeRef: String?, label: String?) -> Unit,
     viewModel: ChatListViewModel = containerViewModel {
-        ChatListViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it::nextRequestId, it.now())
+        ChatListViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it.now())
     },
 ) {
     val threads by viewModel.threads.collectAsState()
-    val created by viewModel.created.collectAsState()
-    val error by viewModel.error.collectAsState()
     val topics by viewModel.topics.collectAsState()
     val workspaces by viewModel.workspaces.collectAsState()
     var newChatExpanded by remember { mutableStateOf(false) }
-
-    LaunchedEffect(created) {
-        created?.let { id ->
-            viewModel.consumeCreated()
-            onOpenThread(id)
-        }
-    }
 
     AppScreen(title = "Chats") {
         // T-022d: chat scope picker — General (no context), vault topics, or
@@ -84,7 +81,7 @@ fun ChatListScreen(
             trailing = "+",
             onClick = {
                 newChatExpanded = false
-                viewModel.newChat()
+                onNewChat(null, null, null)
             },
         )
         if (topics.isNotEmpty() || workspaces.isNotEmpty()) {
@@ -100,7 +97,7 @@ fun ChatListScreen(
                 topics.forEach { topic ->
                     ListRow(title = topic.label) {
                         newChatExpanded = false
-                        viewModel.newChat("topic", topic.id)
+                        onNewChat("topic", topic.id, topic.label)
                     }
                 }
             }
@@ -109,12 +106,11 @@ fun ChatListScreen(
                 workspaces.forEach { workspace ->
                     ListRow(title = workspace.label, subtitle = workspace.ref) {
                         newChatExpanded = false
-                        viewModel.newChat("workspace", workspace.ref)
+                        onNewChat("workspace", workspace.ref, workspace.label)
                     }
                 }
             }
         }
-        error?.let { ListRow(title = it, trailing = "!") }
         if (threads.isEmpty()) {
             EmptyState("No chats yet", "Tap New chat to start")
         } else {
@@ -132,6 +128,100 @@ fun ChatListScreen(
 }
 
 /**
+ * Unsaved new chat: an empty composer, nothing created server-side until
+ * the first send (see [NewChatViewModel]). The keyboard opens straight
+ * away — the only thing to do here is type.
+ */
+@Composable
+fun NewChatScreen(
+    scopeType: String?,
+    scopeRef: String?,
+    label: String?,
+    onBack: () -> Unit,
+    onCreated: (EntityId) -> Unit,
+    viewModel: NewChatViewModel = containerViewModel(key = "chatnew-$scopeType-$scopeRef") {
+        NewChatViewModel(it.chatRepository, it.pendingFirstMessages, scopeType, scopeRef, it::nextRequestId)
+    },
+) {
+    val draft by viewModel.draft.collectAsState()
+    val state by viewModel.state.collectAsState()
+    val created by viewModel.created.collectAsState()
+    val creating = state is NewChatState.Creating
+    val focus = remember { FocusRequester() }
+
+    LaunchedEffect(created) {
+        created?.let { id ->
+            viewModel.consumeCreated()
+            onCreated(id)
+        }
+    }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+
+    ChatScaffold(
+        title = "New chat",
+        onBack = onBack,
+        header = {
+            val scopeText = when (scopeType) {
+                null -> "General"
+                else -> label ?: scopeRef ?: scopeType
+            }
+            TextMMD(
+                text = "Scope: $scopeText",
+                fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        },
+        transcript = {
+            item(key = "empty") {
+                EmptyState("Nothing sent yet", "The chat is created when you send the first message")
+            }
+            (state as? NewChatState.Failed)?.let { failed ->
+                item(key = "failed") {
+                    Column {
+                        ListRow(
+                            title = failed.reason,
+                            subtitle = "Draft kept in the composer — press Send to retry",
+                            trailing = "!",
+                        )
+                        ButtonMMD(
+                            onClick = viewModel::dismissError,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { TextMMD("Dismiss") }
+                    }
+                }
+            }
+        },
+        composer = {
+            val voice = rememberVoiceInput { transcript ->
+                viewModel.onDraftChange(appendTranscript(draft, transcript))
+            }
+            Column {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = viewModel::onDraftChange,
+                        modifier = Modifier.weight(1f).focusRequester(focus),
+                        placeholder = { TextMMD("Message") },
+                        singleLine = false,
+                        maxLines = 6,
+                        trailingIcon = { MicButton(voice) },
+                    )
+                    IconButton(
+                        onClick = viewModel::send,
+                        enabled = draft.isNotBlank() && !creating,
+                        modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                    }
+                }
+                if (creating) TextMMD("Starting chat…", fontSize = 12.sp)
+                VoiceStatusText(voice)
+            }
+        },
+    )
+}
+
+/**
  * Chat thread (T-013): transcript-first layout — top bar, scrolling
  * conversation, fixed bottom composer. Sender identity is carried by
  * alignment and weight (monochrome e-ink): user messages sit in a
@@ -144,7 +234,7 @@ fun ChatThreadScreen(
     threadId: EntityId,
     onBack: () -> Unit,
     viewModel: ChatThreadViewModel = containerViewModel(key = "chat-$threadId") {
-        ChatThreadViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it.noteRepository, threadId, it::nextRequestId, it.clock)
+        ChatThreadViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it.noteRepository, threadId, it::nextRequestId, it.clock, it.pendingFirstMessages.take(threadId))
     },
 ) {
     val thread by viewModel.thread.collectAsState()

@@ -4,6 +4,7 @@ import dev.magnor.kompakt.data.repository.ChatRepository
 import dev.magnor.kompakt.data.repository.NoteRepository
 import dev.magnor.kompakt.data.repository.TopicRepository
 import dev.magnor.kompakt.data.repository.WorkspaceRepository
+import dev.magnor.kompakt.data.PendingFirstMessages
 import dev.magnor.kompakt.domain.ChatExchange
 import dev.magnor.kompakt.domain.ChatThread
 import dev.magnor.kompakt.domain.ChatThreadDraft
@@ -181,6 +182,26 @@ class ChatThreadViewModelTest {
         assertTrue(ChatSendState.Idle == vm.sendState.value)
         assertEquals("", vm.draft.value)
         collector.cancel()
+    }
+
+    @Test
+    fun `thread opens already sending the handed-over first message`() = runTest {
+        val sent = mutableListOf<String>()
+        val repo = ColdChatRepository(snapshot = emptyList())
+        repo.sendOutcome = { _, text ->
+            sent.add(text)
+            val user = msg("chatmsg:u1", MessageRole.USER, text)
+            val assistant = msg("chatmsg:a1", MessageRole.ASSISTANT, "re: $text")
+            repo.snapshot = listOf(user, assistant)
+            ChatExchange(user, assistant)
+        }
+        val vm = ChatThreadViewModel(
+            repo, StaticTopics, StaticWorkspaces, StaticNotes, "chat_1", { "req-x" }, { t0 },
+            initialMessage = "first words",
+        )
+
+        assertEquals(listOf("first words"), sent)
+        assertEquals("", vm.draft.value)
     }
 
     @Test
@@ -530,9 +551,9 @@ class ChatThreadViewModelTest {
     }
 }
 
-/** T-009: list-level new-chat creation surfaces the id for navigation. */
+/** Unsaved new chat: create-on-first-send and the hand-off to the thread. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class ChatListViewModelTest {
+class NewChatViewModelTest {
 
     @Before
     fun setUp() {
@@ -544,25 +565,40 @@ class ChatListViewModelTest {
         Dispatchers.resetMain()
     }
 
+    private fun threadOf(id: String, draft: ChatThreadDraft) = ChatThread(
+        id = id, title = draft.title,
+        createdAt = Instant.parse("2026-08-23T12:00:00Z"),
+        updatedAt = Instant.parse("2026-08-23T12:00:00Z"),
+    )
+
     @Test
-    fun `new chat emits created id and consume clears it`() = runTest {
+    fun `new chat creates nothing until the first send`() = runTest {
         var createdCount = 0
         val repo = object : ChatRepository by ColdChatRepository(emptyList()) {
             override suspend fun createThread(draft: ChatThreadDraft, requestId: RequestId): ChatThread {
                 createdCount++
-                return ChatThread(
-                    id = "chat_9", title = draft.title,
-                    createdAt = Instant.parse("2026-08-23T12:00:00Z"),
-                    updatedAt = Instant.parse("2026-08-23T12:00:00Z"),
-                )
+                return threadOf("chat_9", draft)
             }
         }
-        val vm = ChatListViewModel(repo, StaticTopics, StaticWorkspaces, { "req-1" }, Instant.parse("2026-08-23T12:00:00Z"))
-        vm.newChat()
+        val pending = PendingFirstMessages()
+        val vm = NewChatViewModel(repo, pending, null, null) { "req-1" }
+
+        vm.onDraftChange("   ")
+        vm.send() // blank — ignored
+        assertEquals(0, createdCount)
+        assertNull(vm.created.value)
+
+        vm.onDraftChange("hello")
+        assertEquals(0, createdCount) // typing alone never creates
+        vm.send()
+
+        assertEquals(1, createdCount)
         assertEquals("chat_9", vm.created.value)
+        assertEquals("hello", pending.take("chat_9"))
+        assertNull(pending.take("chat_9")) // handed over exactly once
+        assertEquals("", vm.draft.value)
         vm.consumeCreated()
         assertNull(vm.created.value)
-        assertEquals(1, createdCount)
     }
 
     @Test
@@ -571,18 +607,15 @@ class ChatListViewModelTest {
         val repo = object : ChatRepository by ColdChatRepository(emptyList()) {
             override suspend fun createThread(draft: ChatThreadDraft, requestId: RequestId): ChatThread {
                 drafts.add(draft)
-                return ChatThread(
-                    id = "chat_10", title = draft.title,
-                    createdAt = Instant.parse("2026-08-23T12:00:00Z"),
-                    updatedAt = Instant.parse("2026-08-23T12:00:00Z"),
-                )
+                return threadOf("chat_10", draft)
             }
         }
-        val vm = ChatListViewModel(repo, StaticTopics, StaticWorkspaces, { "req-2" }, Instant.parse("2026-08-23T12:00:00Z"))
-
-        vm.newChat("workspace", "roblox-toolkit")
-        vm.newChat("topic", "evershift")
-        vm.newChat()
+        NewChatViewModel(repo, PendingFirstMessages(), "workspace", "roblox-toolkit") { "r" }
+            .apply { onDraftChange("a"); send() }
+        NewChatViewModel(repo, PendingFirstMessages(), "topic", "evershift") { "r" }
+            .apply { onDraftChange("b"); send() }
+        NewChatViewModel(repo, PendingFirstMessages(), null, null) { "r" }
+            .apply { onDraftChange("c"); send() }
 
         assertEquals(3, drafts.size)
         assertEquals("workspace", drafts[0].scopeType)
@@ -591,5 +624,36 @@ class ChatListViewModelTest {
         assertEquals("evershift", drafts[1].scopeRef)
         assertNull(drafts[2].scopeType) // General — no scope fields on the wire
         assertNull(drafts[2].scopeRef)
+    }
+
+    @Test
+    fun `create failure keeps the draft and retry reuses the same request id`() = runTest {
+        val ids = mutableListOf<RequestId>()
+        var fail = true
+        val repo = object : ChatRepository by ColdChatRepository(emptyList()) {
+            override suspend fun createThread(draft: ChatThreadDraft, requestId: RequestId): ChatThread {
+                ids.add(requestId)
+                if (fail) throw RuntimeException("connection refused")
+                return threadOf("chat_11", draft)
+            }
+        }
+        var n = 0
+        val pending = PendingFirstMessages()
+        val vm = NewChatViewModel(repo, pending, null, null) { "req-${n++}" }
+
+        vm.onDraftChange("keep me")
+        vm.send()
+
+        assertTrue(vm.state.value is NewChatState.Failed)
+        assertEquals("keep me", vm.draft.value)
+        assertNull(vm.created.value)
+        assertNull(pending.take("chat_11"))
+
+        fail = false
+        vm.send()
+
+        assertEquals(listOf("req-0", "req-0"), ids) // idempotent create across retries
+        assertEquals("chat_11", vm.created.value)
+        assertEquals("keep me", pending.take("chat_11"))
     }
 }

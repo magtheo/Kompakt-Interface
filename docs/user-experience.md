@@ -252,9 +252,14 @@ Scope tiers (T-022d):
 - the composer stays editable while a reply is pending (only Send is
   gated); if the pending send fails, its text is restored ahead of
   anything typed meanwhile,
-- **New chat** starts a General chat in one tap (General is the
-  everyday chat, D034); a secondary "New chat in a topic or workspace…"
-  row expands the picker (one row per topic, one per known workspace),
+- **New chat** opens an empty, unsaved composer in one tap (General is
+  the everyday chat, D034) with the keyboard up; a secondary "New chat
+  in a topic or workspace…" row expands the picker (one row per topic,
+  one per known workspace) and opens the same composer with that scope,
+- nothing is created server-side until the first send: Send creates the
+  thread (create request id reused across retries) and the thread opens
+  already sending that message. Backing out of an unsent chat leaves no
+  empty thread behind; a failed create keeps the draft and retries,
 - sending on a General thread may surface a "Move to \<topic\>?" chip —
   Move applies the scope (explicit tap), Not now dismisses it locally;
   the chip never re-routes a message by itself,

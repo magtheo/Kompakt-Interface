@@ -352,6 +352,7 @@ class AppContainer(
     // ---- repositories: stable switch instances (fake ↔ remote per call) ----
 
     val chatRepository: ChatRepository = SwitchChat()
+    val pendingFirstMessages = PendingFirstMessages()
     val agentRepository: AgentRepository = SwitchAgent()
     val workspaceRepository: WorkspaceRepository = SwitchWorkspace()
     val topicRepository: TopicRepository = SwitchTopic()
