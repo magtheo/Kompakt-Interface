@@ -252,8 +252,8 @@ Implemented layout rules (T-013/T-014/T-015):
 Scope tiers (T-022d):
 
 - every thread has a scope — **General**, **Topic** (vault-seeded), or
-  **Workspace** (repo-bound) — shown as a single thin line under the
-  thread info panel (top-bar button) and as a label on list rows,
+  **Workspace** (repo-bound) — shown in the thread info panel (top-bar
+  button) and as a label on list rows,
 - the composer stays editable while a reply is pending (only Send is
   gated); if the pending send fails, its text is restored ahead of
   anything typed meanwhile,
