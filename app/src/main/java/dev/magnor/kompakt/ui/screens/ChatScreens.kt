@@ -106,7 +106,7 @@ fun ChatListScreen(
         }
         error?.let { ListRow(title = it, trailing = "!") }
         if (threads.isEmpty()) {
-            ListRow(title = "No chats yet", subtitle = "Tap New chat above")
+            EmptyState("No chats yet", "Tap New chat above")
         } else {
             threads.forEach { thread ->
                 ListRow(
@@ -270,7 +270,7 @@ fun ChatThreadScreen(
                 }
             }
             if (messages.isEmpty()) {
-                item(key = "empty") { ListRow(title = "No messages", subtitle = "Write below") }
+                item(key = "empty") { EmptyState("No messages", "Write below") }
             }
             itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
                 val isLast = index == messages.lastIndex

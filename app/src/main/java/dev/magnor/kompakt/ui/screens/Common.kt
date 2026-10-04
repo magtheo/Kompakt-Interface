@@ -111,6 +111,15 @@ fun ListRow(
     }
 }
 
+/**
+ * Shared empty/loading placeholder: one card, a plain title and an optional
+ * hint pointing at the next action. Static — no motion (e-ink).
+ */
+@Composable
+fun EmptyState(title: String, hint: String? = null) {
+    ListRow(title = title, subtitle = hint)
+}
+
 @Composable
 private fun ListRowContent(title: String, subtitle: String?, trailing: String?, secondary: Boolean = false) {
     Row(

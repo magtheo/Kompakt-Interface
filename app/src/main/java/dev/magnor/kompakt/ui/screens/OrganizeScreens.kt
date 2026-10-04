@@ -81,8 +81,8 @@ fun ProjectsScreen(
     AppScreen(title = "Projects", onBack = onBack) {
         when {
             state.error != null -> ListRow(title = state.error ?: "Could not load")
-            !state.loaded -> ListRow(title = "Loading…")
-            state.rows.isEmpty() -> ListRow(title = "No projects — vault decides (D004)")
+            !state.loaded -> EmptyState("Loading…")
+            state.rows.isEmpty() -> EmptyState("No projects yet", "Projects are created in the vault")
             else -> state.rows.forEach { row ->
                 val count = when (row.openTasks) {
                     0 -> "no open tasks"
@@ -127,7 +127,7 @@ fun ProjectDetailScreen(
     AppScreen(title = project?.name ?: "Project", onBack = onBack) {
         when {
             state.error != null -> ListRow(title = state.error ?: "Could not load")
-            !state.loaded -> ListRow(title = "Loading…")
+            !state.loaded -> EmptyState("Loading…")
             project == null -> ListRow(title = "Project not found")
             else -> {
                 ListRow(
@@ -147,7 +147,7 @@ fun ProjectDetailScreen(
                     )
                 }
                 if (state.chats.isEmpty()) {
-                    ListRow(title = "No workspace chats for this project")
+                    EmptyState("No workspace chats for this project")
                 }
 
                 state.notes.forEach { note ->
@@ -183,8 +183,8 @@ fun AreasScreen(
     AppScreen(title = "Areas", onBack = onBack) {
         when {
             state.error != null -> ListRow(title = state.error ?: "Could not load")
-            !state.loaded -> ListRow(title = "Loading…")
-            state.areas.isEmpty() -> ListRow(title = "No areas yet")
+            !state.loaded -> EmptyState("Loading…")
+            state.areas.isEmpty() -> EmptyState("No areas yet")
             else -> state.areas.forEach { area ->
                 ListRow(
                     title = area.name,
@@ -214,11 +214,11 @@ fun TasksScreen(
     AppScreen(title = title, onBack = onBack) {
         when {
             state.error != null -> ListRow(title = state.error ?: "Could not load")
-            !state.loaded -> ListRow(title = "Loading…")
+            !state.loaded -> EmptyState("Loading…")
             state.filtered -> {
                 SectionLabel("Open")
                 if (state.open.isEmpty()) {
-                    ListRow(title = "No open tasks here")
+                    EmptyState("No open tasks here")
                 } else {
                     state.open.forEach { task ->
                         ListRow(
@@ -239,7 +239,7 @@ fun TasksScreen(
             else -> {
                 SectionLabel("Today")
                 if (state.today.isEmpty()) {
-                    ListRow(title = "Nothing due today")
+                    EmptyState("Nothing due today")
                 } else {
                     state.today.forEach { task ->
                         ListRow(
@@ -252,7 +252,7 @@ fun TasksScreen(
 
                 SectionLabel("Upcoming")
                 if (state.upcoming.isEmpty()) {
-                    ListRow(title = "No upcoming tasks")
+                    EmptyState("No upcoming tasks")
                 } else {
                     state.upcoming.forEach { task ->
                         ListRow(
@@ -286,7 +286,7 @@ fun NotesScreen(
     AppScreen(title = "Notes", onBack = onBack) {
         when {
             state.error != null -> ListRow(title = state.error ?: "Could not load")
-            !state.loaded -> ListRow(title = "Loading…")
+            !state.loaded -> EmptyState("Loading…")
             state.notes.isEmpty() -> {
                 // Teaching empty state: the pipeline is the mental model.
                 SectionLabel("Nothing here yet")
@@ -333,7 +333,7 @@ fun InboxScreen(
     AppScreen(title = "Inbox", onBack = onBack) {
         when {
             state.error != null -> ListRow(title = state.error ?: "Could not load")
-            !state.loaded -> ListRow(title = "Loading…")
+            !state.loaded -> EmptyState("Loading…")
             state.items.isEmpty() -> ListRow(title = "Inbox empty — all clear")
             else -> state.items.forEach { item ->
                 ListRow(

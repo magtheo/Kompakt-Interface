@@ -4,9 +4,9 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -16,8 +16,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.mudita.mmd.components.text.TextMMD
@@ -71,10 +75,16 @@ fun MicButton(controller: VoiceInputController?, modifier: Modifier = Modifier) 
         if (granted) controller.onMicTap() else controller.permissionDenied()
     }
     when (val state = controller.state) {
-        VoiceInputState.Uploading -> CircularProgressIndicator(
-            modifier = modifier.size(28.dp).padding(4.dp),
-            strokeWidth = 2.dp,
-        )
+        // Static marker, not a spinner: an animated indicator forces
+        // continuous e-ink redraws (AGENTS.md: static status indicators).
+        VoiceInputState.Uploading -> Box(
+            modifier = modifier
+                .minimumInteractiveComponentSize()
+                .semantics { contentDescription = "Transcribing" },
+            contentAlignment = Alignment.Center,
+        ) {
+            TextMMD("…", fontWeight = FontWeight.Bold)
+        }
         else -> IconButton(
             onClick = {
                 val granted = ContextCompat.checkSelfPermission(

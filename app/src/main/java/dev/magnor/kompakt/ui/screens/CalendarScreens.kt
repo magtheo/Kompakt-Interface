@@ -104,7 +104,7 @@ fun CalendarScreen(
             SectionLabel(dayLabel(selected))
             val events = state.eventsOn(selected)
             if (events.isEmpty()) {
-                TextMMD("No events")
+                EmptyState("No events", "Nothing scheduled this day")
             } else {
                 events.forEach { event ->
                     ListRow(
