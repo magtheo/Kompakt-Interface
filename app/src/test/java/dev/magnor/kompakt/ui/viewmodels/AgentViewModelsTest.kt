@@ -62,6 +62,8 @@ private class ColdAgentRepository(
 ) : AgentRepository {
 
     var dispatchError: Exception? = null
+    /** When set, dispatch suspends until completed — holds a call in flight. */
+    var dispatchGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     var dispatched = 0
     var lastDraft: AgentDispatchDraft? = null
 
@@ -79,6 +81,7 @@ private class ColdAgentRepository(
     override suspend fun dispatch(draft: AgentDispatchDraft, requestId: RequestId): AgentRun {
         dispatched++
         lastDraft = draft
+        dispatchGate?.await()
         dispatchError?.let { throw it }
         val run = AgentRun(
             id = "ses_new_${runsSnapshot.size + 1}",
@@ -194,6 +197,25 @@ class AgentDetailViewModelTest {
         assertEquals("Readiness check", vm.lastDispatched.value?.prompt)
         assertNull(vm.feedback.value) // success is the row, not a text note
         runsCollector.cancel()
+        roleCollector.cancel()
+    }
+
+    @Test
+    fun `second dispatch while one is in flight is ignored`() = runTest {
+        val repo = ColdAgentRepository(surface(), mutableListOf())
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        repo.dispatchGate = gate
+        val vm = AgentDetailViewModel(repo, TestWorkspaceRepository(), "opencode", "build") { "req-1" }
+        val roleCollector = launch(UnconfinedTestDispatcher()) { vm.role.collect { } }
+
+        vm.dispatch("first", null) // suspends at the gate
+        assertTrue(vm.dispatching.value)
+        vm.dispatch("second", null) // double-tap: must not start another run
+
+        gate.complete(Unit)
+        assertEquals(1, repo.dispatched)
+        assertFalse(vm.dispatching.value)
+        assertEquals("first", vm.lastDispatched.value?.prompt)
         roleCollector.cancel()
     }
 
