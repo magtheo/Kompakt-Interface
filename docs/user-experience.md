@@ -246,11 +246,15 @@ Implemented layout rules (T-013/T-014/T-015):
 Scope tiers (T-022d):
 
 - every thread has a scope — **General**, **Topic** (vault-seeded), or
-  **Workspace** (repo-bound) — shown as a scope row under the thread
-  header and as a label on list rows,
-- the new-chat action expands into a picker (same pattern as the agent
-  workspace picker): General, one row per topic, one row per known
-  workspace,
+  **Workspace** (repo-bound) — shown as a single thin line under the
+  thread header (expands to the full card and re-scope picker) and as a
+  label on list rows,
+- the composer stays editable while a reply is pending (only Send is
+  gated); if the pending send fails, its text is restored ahead of
+  anything typed meanwhile,
+- **New chat** starts a General chat in one tap (General is the
+  everyday chat, D034); a secondary "New chat in a topic or workspace…"
+  row expands the picker (one row per topic, one per known workspace),
 - sending on a General thread may surface a "Move to \<topic\>?" chip —
   Move applies the scope (explicit tap), Not now dismisses it locally;
   the chip never re-routes a message by itself,

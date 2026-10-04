@@ -1,5 +1,6 @@
 package dev.magnor.kompakt.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,17 +76,25 @@ fun ChatListScreen(
         // T-022d: chat scope picker — General (no context), vault topics, or
         // workspaces (OpenCode sessions). Choice at creation only; the
         // thread header can re-scope later.
+        // General is the everyday chat (D034): one tap straight into it.
+        // Scoped chats (topic / workspace) live behind the secondary row.
         ListRow(
             title = "New chat",
-            subtitle = if (newChatExpanded) null else "Start a conversation",
-            trailing = if (newChatExpanded) "▾" else "▸",
-            onClick = { newChatExpanded = !newChatExpanded },
-        )
-        if (newChatExpanded) {
-            ListRow(title = "General", subtitle = "No topic context") {
+            subtitle = "General — no topic context",
+            trailing = "+",
+            onClick = {
                 newChatExpanded = false
                 viewModel.newChat()
-            }
+            },
+        )
+        if (topics.isNotEmpty() || workspaces.isNotEmpty()) {
+            ListRow(
+                title = "New chat in a topic or workspace…",
+                trailing = if (newChatExpanded) "▾" else "▸",
+                onClick = { newChatExpanded = !newChatExpanded },
+            )
+        }
+        if (newChatExpanded) {
             if (topics.isNotEmpty()) {
                 SectionLabel("Topics")
                 topics.forEach { topic ->
@@ -106,7 +116,7 @@ fun ChatListScreen(
         }
         error?.let { ListRow(title = it, trailing = "!") }
         if (threads.isEmpty()) {
-            EmptyState("No chats yet", "Tap New chat above")
+            EmptyState("No chats yet", "Tap New chat to start")
         } else {
             threads.forEach { thread ->
                 ListRow(
@@ -171,17 +181,37 @@ fun ChatThreadScreen(
             // T-022d: scope row — shows the thread's context (general/topic/
             // workspace); expands to re-scope. The propose chip only ever
             // appears on unscoped threads and applies on explicit Move.
-            ListRow(
-                title = "Scope: ${thread?.scopeLabel ?: "General"}",
-                subtitle = when (thread?.scopeType) {
-                    null -> "Tap to add topic or workspace context"
-                    "topic" -> "Topic"
-                    "workspace" -> "Workspace · auto-commits each turn"
-                    else -> thread?.scopeType
-                },
-                trailing = if (scopeExpanded) "▾" else "▸",
-                onClick = { scopeExpanded = !scopeExpanded },
-            )
+            // Collapsed = one thin line (small e-ink screen: the transcript
+            // gets the height); expanded = the full card with its hint.
+            if (scopeExpanded) {
+                ListRow(
+                    title = "Scope: ${thread?.scopeLabel ?: "General"}",
+                    subtitle = when (thread?.scopeType) {
+                        null -> "Tap to add topic or workspace context"
+                        "topic" -> "Topic"
+                        "workspace" -> "Workspace · auto-commits each turn"
+                        else -> thread?.scopeType
+                    },
+                    trailing = "▾",
+                    onClick = { scopeExpanded = false },
+                )
+            } else {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { scopeExpanded = true }
+                        .minimumInteractiveComponentSize()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    TextMMD(
+                        text = "Scope: ${thread?.scopeLabel ?: "General"}" +
+                            if (thread?.scopeType == "workspace") " · auto-commits" else "",
+                        fontSize = 13.sp,
+                    )
+                    TextMMD(text = "▸", fontSize = 13.sp)
+                }
+            }
             if (scopeExpanded) {
                 ListRow(title = "General", subtitle = "No topic context") {
                     scopeExpanded = false
@@ -334,7 +364,6 @@ fun ChatThreadScreen(
                         onValueChange = viewModel::onDraftChange,
                         modifier = Modifier.weight(1f),
                         placeholder = { TextMMD(if (editing != null) "Edited message" else "Message") },
-                        enabled = !sending,
                         singleLine = false,
                         maxLines = 6,
                         trailingIcon = { MicButton(voice) },

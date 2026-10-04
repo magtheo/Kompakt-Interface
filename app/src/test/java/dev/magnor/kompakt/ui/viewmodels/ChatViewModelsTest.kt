@@ -184,6 +184,25 @@ class ChatThreadViewModelTest {
     }
 
     @Test
+    fun `send failure keeps text typed while the reply was pending`() = runTest {
+        repo = ColdChatRepository(snapshot = emptyList())
+        lateinit var vm: ChatThreadViewModel
+        repo.sendOutcome = { _, _ ->
+            vm.onDraftChange("next thought") // composer stays editable mid-send
+            throw RuntimeException("connection refused")
+        }
+        vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes, "chat_1", { "req-x" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
+
+        vm.onDraftChange("will fail")
+        vm.send()
+
+        assertTrue(vm.sendState.value is ChatSendState.Failed)
+        assertEquals("will fail\n\nnext thought", vm.draft.value)
+        collector.cancel()
+    }
+
+    @Test
     fun `send failure removes optimistic row and restores draft for retry`() = runTest {
         repo = ColdChatRepository(snapshot = emptyList())
         repo.sendOutcome = { _, _ -> throw RuntimeException("connection refused") }

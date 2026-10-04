@@ -209,6 +209,16 @@ class ChatThreadViewModel(
         draft.value = value
     }
 
+    /**
+     * Put a failed message's text back in the composer. The field stays
+     * editable while a reply is pending, so the user may already have typed
+     * the next message — keep both rather than overwrite it.
+     */
+    private fun restoreDraft(text: String) {
+        val typed = draft.value
+        draft.value = if (typed.isBlank()) text else text + "\n\n" + typed
+    }
+
     fun dismissNotice() {
         _notice.value = null
     }
@@ -322,7 +332,7 @@ class ChatThreadViewModel(
             runCatching { chatRepository.truncate(threadId, keepThrough, newRequestId()) }
                 .onFailure { e ->
                     _sendState.value = ChatSendState.Idle
-                    draft.value = text
+                    restoreDraft(text)
                     _notice.value = "Regenerate failed: ${e.message}"
                 }
                 .onSuccess {
@@ -362,7 +372,7 @@ class ChatThreadViewModel(
             runCatching { chatRepository.truncate(threadId, keepThrough, newRequestId()) }
                 .onFailure { e ->
                     _sendState.value = ChatSendState.Idle
-                    draft.value = text
+                    restoreDraft(text)
                     _notice.value = "Edit failed: ${e.message}"
                 }
                 .onSuccess {
@@ -409,7 +419,7 @@ class ChatThreadViewModel(
                 }
                 .onFailure { e ->
                     overlay.value = overlay.value.filter { it.id != LOCAL_PENDING_ID }
-                    draft.value = text // restored for retry
+                    restoreDraft(text) // restored for retry
                     _sendState.value = ChatSendState.Failed(text, e.message)
                 }
         }
