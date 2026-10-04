@@ -34,6 +34,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.datetime.Instant
 import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
@@ -390,6 +391,8 @@ fun ChatThreadScreen(
                 val isLast = index == messages.lastIndex
                 ChatMessageRow(
                     message = message,
+                    previousAt = messages.getOrNull(index - 1)?.createdAt,
+                    messagesAfter = messages.size - 1 - index,
                     expanded = openMessageId == message.id,
                     canRegenerate = isLast && message.role == MessageRole.ASSISTANT,
                     onClick = { openMessageId = if (openMessageId == message.id) null else message.id },
@@ -469,14 +472,26 @@ fun ChatThreadScreen(
     )
 }
 
+/** Show a message's time only after a pause this long (or on the first one). */
+private const val TIME_GAP_SECONDS = 10 * 60L
+
 /**
  * One message. Monochrome sender coding: user = right-shifted bordered card,
- * semi-bold; assistant = full-width plain text. Timestamp sits in the meta
- * line; pending/failed glyphs carry delivery state.
+ * semi-bold; assistant = plain full-width text (no card — a long thread
+ * should not read as a stack of boxes). The sender/time meta line is quiet
+ * by default: shown on the first message, after a pause of [TIME_GAP_SECONDS],
+ * while pending/failed (the glyphs carry delivery state), or when tapped.
+ *
+ * Tapping a message reveals its meta plus one "Actions" row; the history
+ * actions (edit / save / regenerate / revert) sit behind it, and the two
+ * that drop messages (revert, regenerate) ask for a confirm first — a
+ * stray tap must not silently lose conversation.
  */
 @Composable
 private fun ChatMessageRow(
     message: Message,
+    previousAt: Instant?,
+    messagesAfter: Int,
     expanded: Boolean,
     canRegenerate: Boolean,
     onClick: () -> Unit,
@@ -485,6 +500,10 @@ private fun ChatMessageRow(
     onRegenerate: () -> Unit,
     onSaveNote: () -> Unit,
 ) {
+    val delivered = message.status != MessageStatus.PENDING && message.status != MessageStatus.FAILED
+    val afterPause = previousAt == null ||
+        (message.createdAt - previousAt).inWholeSeconds >= TIME_GAP_SECONDS
+    val showMeta = expanded || !delivered || afterPause
     val meta = buildString {
         append(if (message.role == MessageRole.USER) "You" else "Assistant")
         append(" · ")
@@ -495,46 +514,97 @@ private fun ChatMessageRow(
             else -> Unit
         }
     }
+    var actionsOpen by remember(message.id) { mutableStateOf(false) }
+    var confirming by remember(message.id) { mutableStateOf<String?>(null) }
+    // Collapse the action state whenever the message itself collapses.
+    LaunchedEffect(expanded) {
+        if (!expanded) {
+            actionsOpen = false
+            confirming = null
+        }
+    }
     Column(Modifier.fillMaxWidth()) {
         if (message.role == MessageRole.USER) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                 CardMMD(onClick = onClick, modifier = Modifier.fillMaxWidth(0.85f)) {
                     Column(Modifier.padding(12.dp)) {
                         MarkdownText(raw = message.content, baseFontWeight = FontWeight.SemiBold)
-                        TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                        if (showMeta) {
+                            TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                        }
                     }
                 }
             }
         } else {
-            CardMMD(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    MarkdownText(raw = message.content)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onClick)
+                    .padding(vertical = 4.dp),
+            ) {
+                MarkdownText(raw = message.content)
+                if (showMeta) {
                     TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }
             }
         }
         if (expanded) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (message.role == MessageRole.USER) {
-                    ButtonMMD(onClick = onEdit, modifier = Modifier.weight(1f)) {
-                        TextMMD("Edit")
+            ListRow(
+                title = "Actions",
+                trailing = if (actionsOpen) "▾" else "▸",
+                onClick = {
+                    actionsOpen = !actionsOpen
+                    confirming = null
+                },
+            )
+            if (actionsOpen) {
+                when (confirming) {
+                    "revert" -> ConfirmRow(
+                        text = if (messagesAfter == 0) "Nothing after this message to drop."
+                        else "Drop the $messagesAfter message${if (messagesAfter == 1) "" else "s"} after this one? This can't be undone.",
+                        confirmLabel = "Revert",
+                        onConfirm = { confirming = null; onRevert() },
+                        onCancel = { confirming = null },
+                    )
+                    "regenerate" -> ConfirmRow(
+                        text = "Drop this reply and ask again? This can't be undone.",
+                        confirmLabel = "Regenerate",
+                        onConfirm = { confirming = null; onRegenerate() },
+                        onCancel = { confirming = null },
+                    )
+                    else -> {
+                        if (message.role == MessageRole.USER) {
+                            // Edit only fills the composer; nothing is dropped until Send.
+                            ListRow(title = "Edit") { onEdit() }
+                        } else {
+                            // T-022b: explicit transition — the reply text becomes
+                            // an inbox note verbatim (source: this thread).
+                            ListRow(title = "Save as note") { onSaveNote() }
+                        }
+                        if (canRegenerate) {
+                            ListRow(title = "Regenerate", subtitle = "Drops this reply") { confirming = "regenerate" }
+                        }
+                        ListRow(title = "Revert to here", subtitle = "Drops everything after") { confirming = "revert" }
                     }
-                } else {
-                    // T-022b: explicit transition — the reply text becomes
-                    // an inbox note verbatim (source: this thread).
-                    ButtonMMD(onClick = onSaveNote, modifier = Modifier.weight(1f)) {
-                        TextMMD("Save as note")
-                    }
-                }
-                if (canRegenerate) {
-                    ButtonMMD(onClick = onRegenerate, modifier = Modifier.weight(1f)) {
-                        TextMMD("Regenerate")
-                    }
-                }
-                ButtonMMD(onClick = onRevert, modifier = Modifier.weight(1f)) {
-                    TextMMD("Revert to here")
                 }
             }
+        }
+    }
+}
+
+/** Inline confirm for a destructive history action: text + Cancel / confirm. */
+@Composable
+private fun ConfirmRow(
+    text: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        ListRow(title = text)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ButtonMMD(onClick = onCancel, modifier = Modifier.weight(1f)) { TextMMD("Cancel") }
+            ButtonMMD(onClick = onConfirm, modifier = Modifier.weight(1f)) { TextMMD(confirmLabel) }
         }
     }
 }
