@@ -16,7 +16,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -90,7 +90,7 @@ fun TodayScreen(
         actions = {
             // D030 entry, icon-only — minimal footprint next to the bell.
             IconButton(onClick = onOpenCalendar) {
-                Icon(Icons.Filled.CalendarMonth, contentDescription = "Calendar")
+                Icon(Icons.Filled.DateRange, contentDescription = "Calendar")
             }
             if (showInboxAction) {
                 IconButton(onClick = onOpenInbox) {

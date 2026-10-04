@@ -6,9 +6,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.data.remote.HttpApi
+import dev.magnor.kompakt.ui.AppIcons
 import dev.magnor.kompakt.ui.LocalAppContainer
 import java.io.File
 
@@ -89,16 +87,16 @@ fun MicButton(controller: VoiceInputController?, modifier: Modifier = Modifier) 
         ) {
             when (state) {
                 is VoiceInputState.Recording -> Icon(
-                    Icons.Filled.Stop,
+                    AppIcons.Stop,
                     contentDescription = "Stop recording",
                     tint = MaterialTheme.colorScheme.error,
                 )
                 is VoiceInputState.Failed -> Icon(
-                    Icons.Filled.Mic,
+                    AppIcons.Mic,
                     contentDescription = "Retry voice input",
                     tint = MaterialTheme.colorScheme.error,
                 )
-                else -> Icon(Icons.Filled.Mic, contentDescription = "Record voice input")
+                else -> Icon(AppIcons.Mic, contentDescription = "Record voice input")
             }
         }
     }
