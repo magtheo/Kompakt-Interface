@@ -238,8 +238,14 @@ Implemented layout rules (T-013/T-014/T-015):
   - **Revert to here** — drop everything after it,
   - **Regenerate** — drop the reply and ask again,
   all destructive, no branches (see D026),
-- a Jump-to-message inline index provides fast navigation in long
-  threads,
+- thread info lives behind one top-bar button (ⓘ): the scope row with
+  its re-scope picker and a Jump-to-message index for long threads; a
+  dot beside the button marks a pending topic suggestion. The panel is
+  height-bounded and scrollable,
+- status is one quiet line, not a card: "Assistant is replying…",
+  "Workspace turn running…", and dismissible notices; empty threads and
+  the unsent new-chat screen show no placeholder card (the composer and
+  keyboard are the prompt),
 - threads auto-title from the first user message server-side;
   explicit titles are never overwritten.
 
@@ -247,8 +253,7 @@ Scope tiers (T-022d):
 
 - every thread has a scope — **General**, **Topic** (vault-seeded), or
   **Workspace** (repo-bound) — shown as a single thin line under the
-  thread header (expands to the full card and re-scope picker) and as a
-  label on list rows,
+  thread info panel (top-bar button) and as a label on list rows,
 - the composer stays editable while a reply is pending (only Send is
   gated); if the pending send fails, its text is restored ahead of
   anything typed meanwhile,

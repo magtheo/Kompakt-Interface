@@ -6,11 +6,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -158,23 +162,12 @@ fun NewChatScreen(
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
 
     ChatScaffold(
-        title = "New chat",
-        onBack = onBack,
-        header = {
-            val scopeText = when (scopeType) {
-                null -> "General"
-                else -> label ?: scopeRef ?: scopeType
-            }
-            TextMMD(
-                text = "Scope: $scopeText",
-                fontSize = 13.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
+        title = "New chat · " + when (scopeType) {
+            null -> "General"
+            else -> label ?: scopeRef ?: scopeType
         },
+        onBack = onBack,
         transcript = {
-            item(key = "empty") {
-                EmptyState("Nothing sent yet", "The chat is created when you send the first message")
-            }
             (state as? NewChatState.Failed)?.let { failed ->
                 item(key = "failed") {
                     Column {
@@ -246,6 +239,7 @@ fun ChatThreadScreen(
     val proposedTopic by viewModel.proposedTopic.collectAsState()
     val topics by viewModel.topics.collectAsState()
     val workspaces by viewModel.workspaces.collectAsState()
+    var infoOpen by remember { mutableStateOf(false) }
     var scopeExpanded by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
@@ -254,12 +248,13 @@ fun ChatThreadScreen(
     var openMessageId by remember { mutableStateOf<EntityId?>(null) }
 
     val sending = sendState is ChatSendState.Sending
-    // Item 0 = jump header; messages follow; one trailing status item.
-    val lastItem = if (messages.isEmpty()) 0 else messages.size - 1 + 1 +
+    // Items: messages 0..n-1, then at most one trailing status item.
+    val lastItem = if (messages.isEmpty()) 0 else messages.size - 1 +
         (if (sending || sendState is ChatSendState.Failed) 1 else 0)
     LaunchedEffect(messages.size, sending, sendState) {
-        if (listState.layoutInfo.totalItemsCount > 0) {
-            runCatching { listState.scrollToItem(lastItem) }
+        val total = listState.layoutInfo.totalItemsCount
+        if (total > 0) {
+            runCatching { listState.scrollToItem(lastItem.coerceAtMost(total - 1)) }
         }
     }
 
@@ -267,77 +262,95 @@ fun ChatThreadScreen(
         title = thread?.title ?: "Chat",
         onBack = onBack,
         listState = listState,
-        header = {
-            // T-022d: scope row — shows the thread's context (general/topic/
-            // workspace); expands to re-scope. The propose chip only ever
-            // appears on unscoped threads and applies on explicit Move.
-            // Collapsed = one thin line (small e-ink screen: the transcript
-            // gets the height); expanded = the full card with its hint.
-            if (scopeExpanded) {
-                ListRow(
-                    title = "Scope: ${thread?.scopeLabel ?: "General"}",
-                    subtitle = when (thread?.scopeType) {
-                        null -> "Tap to add topic or workspace context"
-                        "topic" -> "Topic"
-                        "workspace" -> "Workspace · auto-commits each turn"
-                        else -> thread?.scopeType
-                    },
-                    trailing = "▾",
-                    onClick = { scopeExpanded = false },
-                )
-            } else {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { scopeExpanded = true }
-                        .minimumInteractiveComponentSize()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    TextMMD(
-                        text = "Scope: ${thread?.scopeLabel ?: "General"}" +
-                            if (thread?.scopeType == "workspace") " · auto-commits" else "",
-                        fontSize = 13.sp,
-                    )
-                    TextMMD(text = "▸", fontSize = 13.sp)
-                }
+        // Thread info (scope, re-scope, jump) lives behind one top-bar
+        // button; the dot marks a pending topic suggestion.
+        actions = {
+            IconButton(onClick = { infoOpen = !infoOpen }) {
+                Icon(Icons.Filled.Info, contentDescription = "Chat info")
             }
-            if (scopeExpanded) {
-                ListRow(title = "General", subtitle = "No topic context") {
-                    scopeExpanded = false
-                    viewModel.setScope(null, null)
-                }
-                if (topics.isNotEmpty()) {
-                    SectionLabel("Topics")
-                    topics.forEach { topic ->
-                        ListRow(
-                            title = topic.label,
-                            trailing = if (thread?.scopeType == "topic" && thread?.scopeRef == topic.id) "●" else null,
-                        ) {
+            if (proposedTopic != null) TextMMD("●", modifier = Modifier.padding(end = 8.dp))
+        },
+        header = {
+            if (infoOpen) {
+                // Bounded + scrollable: a long jump index must not push the
+                // transcript and composer off screen.
+                Column(
+                    Modifier
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                ) {
+                    // T-022d: scope — the thread's context (general/topic/
+                    // workspace); expands to re-scope. Always explicit.
+                    ListRow(
+                        title = "Scope: ${thread?.scopeLabel ?: "General"}",
+                        subtitle = when (thread?.scopeType) {
+                            null -> "Tap to add topic or workspace context"
+                            "topic" -> "Topic"
+                            "workspace" -> "Workspace · auto-commits each turn"
+                            else -> thread?.scopeType
+                        },
+                        trailing = if (scopeExpanded) "▾" else "▸",
+                        onClick = { scopeExpanded = !scopeExpanded },
+                    )
+                    if (scopeExpanded) {
+                        ListRow(title = "General", subtitle = "No topic context") {
                             scopeExpanded = false
-                            viewModel.setScope("topic", topic.id)
+                            viewModel.setScope(null, null)
+                        }
+                        if (topics.isNotEmpty()) {
+                            SectionLabel("Topics")
+                            topics.forEach { topic ->
+                                ListRow(
+                                    title = topic.label,
+                                    trailing = if (thread?.scopeType == "topic" && thread?.scopeRef == topic.id) "●" else null,
+                                ) {
+                                    scopeExpanded = false
+                                    viewModel.setScope("topic", topic.id)
+                                }
+                            }
+                        }
+                        if (workspaces.isNotEmpty()) {
+                            SectionLabel("Workspaces")
+                            workspaces.forEach { workspace ->
+                                ListRow(
+                                    title = workspace.label,
+                                    subtitle = workspace.ref,
+                                    trailing = if (thread?.scopeType == "workspace" && thread?.scopeRef == workspace.ref) "●" else null,
+                                ) {
+                                    scopeExpanded = false
+                                    viewModel.setScope("workspace", workspace.ref)
+                                }
+                            }
                         }
                     }
-                }
-                if (workspaces.isNotEmpty()) {
-                    SectionLabel("Workspaces")
-                    workspaces.forEach { workspace ->
+                    if (messages.size > 1) {
                         ListRow(
-                            title = workspace.label,
-                            subtitle = workspace.ref,
-                            trailing = if (thread?.scopeType == "workspace" && thread?.scopeRef == workspace.ref) "●" else null,
-                        ) {
-                            scopeExpanded = false
-                            viewModel.setScope("workspace", workspace.ref)
+                            title = "Jump to message",
+                            trailing = if (jumpOpen) "▾" else "▸",
+                            onClick = { jumpOpen = !jumpOpen },
+                        )
+                        if (jumpOpen) {
+                            messages.forEachIndexed { index, message ->
+                                ListRow(
+                                    title = "#${index + 1} · ${mdPreview(message.content, 42)}",
+                                    subtitle = "${if (message.role == MessageRole.USER) "You" else "Assistant"} · ${message.createdAt.timeOfDay()}",
+                                    onClick = {
+                                        jumpOpen = false
+                                        infoOpen = false
+                                        scope.launch { listState.scrollToItem(index) }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
             }
             if (thread?.pendingReply == true) {
-                ListRow(
-                    title = "Workspace turn still running",
-                    subtitle = "Checking every 15 s — reply lands here",
-                    trailing = "…",
+                TextMMD(
+                    text = "Workspace turn running… checking every 15 s",
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
             proposedTopic?.let { topic ->
@@ -358,40 +371,21 @@ fun ChatThreadScreen(
                     }
                 }
             }
-            if (notice != null) {
-                ListRow(
-                    title = notice!!,
-                    trailing = "✕",
-                    onClick = viewModel::dismissNotice,
-                )
+            notice?.let { text ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = viewModel::dismissNotice)
+                        .minimumInteractiveComponentSize()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    TextMMD(text = text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    TextMMD(text = "✕", fontSize = 13.sp)
+                }
             }
         },
         transcript = {
-            if (messages.size > 1) {
-                item(key = "jump") {
-                    Column {
-                        ButtonMMD(
-                            onClick = { jumpOpen = !jumpOpen },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { TextMMD(if (jumpOpen) "Jump ▴" else "Jump to message ▾") }
-                        if (jumpOpen) {
-                            messages.forEachIndexed { index, message ->
-                                ListRow(
-                                    title = "#${index + 1} · ${mdPreview(message.content, 42)}",
-                                    subtitle = "${if (message.role == MessageRole.USER) "You" else "Assistant"} · ${message.createdAt.timeOfDay()}",
-                                    onClick = {
-                                        jumpOpen = false
-                                        scope.launch { listState.scrollToItem(index + 1) }
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            if (messages.isEmpty()) {
-                item(key = "empty") { EmptyState("No messages", "Write below") }
-            }
             itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
                 val isLast = index == messages.lastIndex
                 ChatMessageRow(
@@ -406,7 +400,7 @@ fun ChatThreadScreen(
                 )
             }
             if (sending) {
-                item(key = "sending") { ListRow(title = "Assistant is replying…", trailing = "…") }
+                item(key = "sending") { TextMMD("Assistant is replying…", fontSize = 13.sp) }
             }
             (sendState as? ChatSendState.Failed)?.let { failed ->
                 item(key = "failed") {
