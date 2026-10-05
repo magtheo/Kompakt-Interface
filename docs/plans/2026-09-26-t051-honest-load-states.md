@@ -185,3 +185,42 @@ throw retry only on screen re-entry.
 
 **Remaining:** device install + smoke (USB), merge, re-apply stashed
 unrelated CalendarScreens fix on main.
+
+---
+
+## Device smoke record (2026-10-05, USB, APK from f52aa02)
+
+Install clean: `adb install -r` Success; DuraSpeed whitelist intact; 
+RecentsKeyService still bound post-install (no force-stop used).
+
+- **(a) Tunnel up — PASS.** App launch → Chats: fresh list fetch (2 threads,
+  live data). Bonus frame: Today during the initial dial rendered the honest
+  error row "Server unreachable — check connection and reopen" — no fake
+  empty during the cold start.
+- **(b) Tunnel down → reopen — PASS (logcat-verified).** 45 s background tore
+  the tunnel down (T-050 contract). Reopen dial timeline from logcat:
+  11:25:21.7 GoBackend TimeoutException (first attempt) → retry →
+  "Bringing tunnel kompakt UP" 11:25:24.2 → "tunnel state -> UP" 11:25:24.3 →
+  `server-reachable=true` 11:25:28.2. Screen rendered the cached list
+  instantly from the in-memory repo cache (warm-reopen path; the
+  "Connecting — secure tunnel" subtitle fires only with no cached data, i.e.
+  cold process — not exercisable without killing the process, which the
+  never-force-stop a11y rule forbids). Stale-while-revalidate overlay = T-052.
+- **(c) Coordinator down — PASS.** `systemctl --user stop` for ~2.5 min
+  (under the 15-min probe threshold — correctly no Telegram alert). A
+  not-yet-visited list (Agents = cold entry, no cache) rendered verbatim:
+  "Offline — server unreachable" / "Can't confirm empty while offline" —
+  the D037 amendment live on device. Coordinator restored (health 200);
+  recovery proven by fresh 200 fetches (Today at 11:29:36, chat list).
+
+**Smoke finding (recorded, non-blocking — D037 residual):** transport health
+is app-scoped on the HttpApi choke point, so a *successful fetch on another
+screen* heals the shared status while an unrefreshed list still holds
+degraded empties → that list can render "No X configured" without its own
+server confirmation until its next repository refresh (observed on Agents:
+offline row → "No backends configured" with no agents GET between). Not a
+T-051 contract break (the offline row + amendment behaved as specified);
+candidate fix: refetch-on-transport-heal at the repository level, or the
+T-052 refresh affordance ("Updated HH:MM · refreshing…") which surfaces
+staleness instead of hiding it.
+
