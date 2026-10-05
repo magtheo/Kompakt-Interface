@@ -929,3 +929,21 @@ Publishing constraints (enforced from Sep 2026):
   publication time; treat any pre-publication commit hashes as void.
 
 This closes the deferred "final open-source license" item.
+
+## D037 — Transport health via app-scoped status at the HttpApi choke point (not typed repository results)
+
+Locked Sep 28 (user "go" on the Sep 26 audit plan). `degradeTransport`'s
+swallow of transport failures into empty data (T-045 hardening, the Sept-2
+crash invariant) stays untouched; transport health is surfaced separately:
+`HttpApi.execute` — the single choke point every request passes — feeds an
+app-scoped `StateFlow<TransportStatus>` (Idle / Ok / Degraded(at, cause)),
+exposed on AppContainer (`Idle` while unenrolled/fake mode — no request can
+ever land, nothing to report). Screens combine `loaded=false` + `Degraded`
+to render "Offline — server unreachable" instead of a false "No X yet".
+Status writes are best-effort (`runCatching`) and never alter the request's
+own result — the failure taxonomy callers see is unchanged.
+
+Rejected alternative: repository signatures → `Flow<FetchResult<T>>` — ~10
+repositories + fakes + every view model rewritten, churn with no extra
+user-visible gain. Implementation: T-051
+(`docs/plans/2026-09-26-t051-honest-load-states.md`).

@@ -25,6 +25,7 @@ import dev.magnor.kompakt.domain.RequestId
 import dev.magnor.kompakt.domain.SteerOutcome
 import dev.magnor.kompakt.domain.TaskDraft
 import dev.magnor.kompakt.domain.Workspace
+import dev.magnor.kompakt.ui.userMessage
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -52,11 +54,34 @@ class AgentsListViewModel(
     agentRepository: AgentRepository,
     val now: Instant,
 ) : ViewModel() {
-    val surface: StateFlow<AgentsSurface> = agentRepository.observeSurface()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AgentsSurface())
 
-    val runs: StateFlow<List<AgentRun>> = agentRepository.observeRuns()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /**
+     * T-051: one honest list state (T-024 pattern). `combine` waits for both
+     * cold one-shot fetches, so `loaded` flips only when the screen's data is
+     * actually renderable — Loading/Offline rows, never a false "No backends
+     * configured" mid-fetch. Transport failures are degraded to empty lists
+     * at the repository boundary (Sept-2 invariant, D037); anything that
+     * still throws lands in `error` with the landed data preserved (M1,
+     * T-024 defensive form), so the Offline row wins over a false empty and
+     * a mid-stream failure never wipes rows already on screen.
+     */
+    data class AgentsUiState(
+        val loaded: Boolean = false,
+        val surface: AgentsSurface = AgentsSurface(),
+        val runs: List<AgentRun> = emptyList(),
+        val error: String? = null,
+    )
+
+    /** Last state that landed upstream — what `.catch` must preserve (M1). */
+    private var landed = AgentsUiState()
+
+    val state: StateFlow<AgentsUiState> = combine(
+        agentRepository.observeSurface(),
+        agentRepository.observeRuns(),
+    ) { surface, runs -> AgentsUiState(loaded = true, surface = surface, runs = runs) }
+        .onEach { landed = it }
+        .catch { e -> emit(landed.copy(error = e.userMessage())) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AgentsUiState())
 }
 
 /**
@@ -98,6 +123,20 @@ class AgentDetailViewModel(
         .flatMapLatest { agentRepository.observeRuns() }
         .map { list -> list.filter { it.backend == backend && it.agent == agentName } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * T-051: true once the surface fetch (the source of `role`,
+     * `backendInfo` and the dispatch gating) has landed — the Task-5
+     * treatment. `map { true }` is sticky across refresh ticks so a
+     * re-collection never flashes a Loading row; the defensive catch keeps
+     * the current flag (false) if anything slips past degradeTransport,
+     * per the Sept-2 spirit. The screen shows Loading/Offline instead of a
+     * false "Role not found on this backend" while the fetch is in flight.
+     */
+    val loaded: StateFlow<Boolean> = agentRepository.observeSurface()
+        .map { true }
+        .catch { }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private val _feedback = MutableStateFlow<String?>(null)
     val feedback: StateFlow<String?> = _feedback.asStateFlow()
@@ -194,6 +233,19 @@ class AgentRunDetailViewModel(
             stopPolling()
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * T-051: true once the run fetch has landed — the Task-5 treatment.
+     * `map { true }` is sticky across poll ticks, so a refresh never
+     * flashes a Loading row; the defensive catch keeps the current flag
+     * (false) if anything slips past degradeTransport, per the Sept-2
+     * spirit. The screen shows Loading/Offline instead of a premature
+     * "Run not found" while the fetch is in flight.
+     */
+    val loaded: StateFlow<Boolean> = tickedRun
+        .map { true }
+        .catch { }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /**
      * T-017: a busy turn answers send with 409 (SessionBusyError) — the

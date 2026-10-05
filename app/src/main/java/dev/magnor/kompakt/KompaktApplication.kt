@@ -52,6 +52,10 @@ class KompaktApplication : Application() {
             captureQueueDir = java.io.File(filesDir, "captures"),
             themeStore = ThemeStore(java.io.File(filesDir, "theme.txt")),
             tunnelConfigured = tunnelController.isConfigured,
+            // T-051 (W2): expose the controller's phase for honest loading
+            // subtitles. Only in tunnel mode — without tunnel.conf there is
+            // no dial, so no phase to report.
+            tunnelPhase = if (tunnelController.isConfigured) tunnelController.state else null,
             tunnelGate = dev.magnor.kompakt.data.remote.TunnelGate { timeoutMs ->
                 if (tunnelController.awaitReady(timeoutMs - RAISE_BUDGET_MS.coerceAtMost(timeoutMs))) {
                     return@TunnelGate true

@@ -1,14 +1,24 @@
 package dev.magnor.kompakt.ui.viewmodels
 
 import dev.magnor.kompakt.data.fake.FakeCalendarRepository
+import dev.magnor.kompakt.data.fake.FakeData
+import dev.magnor.kompakt.data.repository.CalendarRepository
 import dev.magnor.kompakt.data.repository.CaptureRepository
+import dev.magnor.kompakt.domain.CalendarEvent
+import dev.magnor.kompakt.domain.CalendarInfo
 import dev.magnor.kompakt.domain.CaptureProposal
 import dev.magnor.kompakt.domain.CaptureResult
 import dev.magnor.kompakt.domain.CaptureType
+import dev.magnor.kompakt.domain.EventCreateResult
 import dev.magnor.kompakt.domain.EventDraft
+import dev.magnor.kompakt.domain.EventUpdate
+import dev.magnor.kompakt.domain.OfflineException
 import dev.magnor.kompakt.domain.RequestId
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -24,6 +34,7 @@ import kotlinx.datetime.YearMonth
 import kotlinx.datetime.yearMonth
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -94,6 +105,69 @@ class CalendarViewModelsTest {
         val aug22 = vm.state.value.eventsOn(LocalDate.parse("2026-08-22"))
         // personal:event_001 (Philosophy) seeds at 09:00Z = 11:00 Oslo same day.
         assertTrue(aug22.any { it.title == "Philosophy" })
+    }
+
+    // ---- T-051: honest load state (Loading/Offline vs false "No events") ----
+
+    /** Window-fetch behavior is injectable: gate it, fail it, or feed it. */
+    private class StubCalendarRepository(
+        private val fetch: suspend () -> List<CalendarEvent>,
+    ) : CalendarRepository {
+        override fun observeCalendars(): Flow<List<CalendarInfo>> = MutableStateFlow(emptyList())
+        override suspend fun fetchWindow(from: String, to: String): List<CalendarEvent> = fetch()
+        override suspend fun fetchEvent(id: String): CalendarEvent? = null
+        override suspend fun createEvent(requestId: String, draft: EventDraft): EventCreateResult =
+            EventCreateResult("stub:1", "created")
+        override suspend fun updateEvent(id: String, patch: EventUpdate): Boolean = false
+        override suspend fun deleteEvent(id: String): Boolean = false
+    }
+
+    @Test
+    fun `loaded starts false while the window fetch is in flight`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repo = StubCalendarRepository { gate.await(); FakeData.calendarEvents }
+        val vm = CalendarViewModel(repo, now, zone) { "r" }
+
+        // In flight: the agenda must say Loading, never a false "No events".
+        assertFalse(vm.state.value.loaded)
+
+        gate.complete(Unit)
+        runCurrent()
+        assertTrue(vm.state.value.loaded)
+    }
+
+    @Test
+    fun `loaded flips true when the window fetch lands`() = runTest {
+        val repo = FakeCalendarRepository()
+        val vm = CalendarViewModel(repo, now, zone) { "r" }
+
+        assertTrue(vm.state.value.loaded)
+        assertTrue(vm.state.value.events.isNotEmpty())
+    }
+
+    @Test
+    fun `loaded stays false when the window fetch fails offline`() = runTest {
+        val repo = StubCalendarRepository { throw OfflineException(RuntimeException("no route")) }
+        val vm = CalendarViewModel(repo, now, zone) { "r" }
+
+        // Offline: the agenda shows Offline (with degraded transport), not
+        // a false "No events"; the error line carries the cause.
+        assertFalse(vm.state.value.loaded)
+        assertNotNull(vm.state.value.error)
+    }
+
+    @Test
+    fun `loaded stays true across month navigation`() = runTest {
+        val repo = FakeCalendarRepository()
+        val vm = CalendarViewModel(repo, now, zone) { "r" }
+        assertTrue(vm.state.value.loaded)
+
+        vm.nextMonth()
+        runCurrent()
+
+        // Sticky: navigating months must not flash a Loading row while the
+        // new window fetches (old window stays rendered until it swaps in).
+        assertTrue(vm.state.value.loaded)
     }
 
     @Test

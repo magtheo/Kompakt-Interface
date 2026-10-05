@@ -29,10 +29,13 @@ import androidx.compose.ui.unit.sp
 import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
+import dev.magnor.kompakt.data.remote.TransportStatus
 import dev.magnor.kompakt.domain.EntityId
 import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
+import dev.magnor.kompakt.sync.TunnelController
+import dev.magnor.kompakt.ui.LocalAppContainer
 import dev.magnor.kompakt.ui.MarkdownText
 import dev.magnor.kompakt.voice.MicButton
 import dev.magnor.kompakt.voice.VoiceStatusText
@@ -56,11 +59,17 @@ fun ChatListScreen(
         ChatListViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it::nextRequestId, it.now())
     },
 ) {
-    val threads by viewModel.threads.collectAsState()
+    val state by viewModel.state.collectAsState()
     val created by viewModel.created.collectAsState()
     val error by viewModel.error.collectAsState()
-    val topics by viewModel.topics.collectAsState()
-    val workspaces by viewModel.workspaces.collectAsState()
+
+    // T-051: transport health from the app container (established
+    // composition-local route — see VoiceUi) distinguishes Offline from
+    // Loading while the list fetches are in flight.
+    val transport by LocalAppContainer.current.transportStatus.collectAsState()
+    // T-051 (W2): tunnel dial phase — the loading subtitle tells the user
+    // whether the wait is the (cold) dial or the fetch itself.
+    val tunnel by LocalAppContainer.current.tunnelState.collectAsState()
     var newChatExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(created) {
@@ -85,18 +94,18 @@ fun ChatListScreen(
                 newChatExpanded = false
                 viewModel.newChat()
             }
-            if (topics.isNotEmpty()) {
+            if (state.topics.isNotEmpty()) {
                 SectionLabel("Topics")
-                topics.forEach { topic ->
+                state.topics.forEach { topic ->
                     ListRow(title = topic.label) {
                         newChatExpanded = false
                         viewModel.newChat("topic", topic.id)
                     }
                 }
             }
-            if (workspaces.isNotEmpty()) {
+            if (state.workspaces.isNotEmpty()) {
                 SectionLabel("Workspaces")
-                workspaces.forEach { workspace ->
+                state.workspaces.forEach { workspace ->
                     ListRow(title = workspace.label, subtitle = workspace.ref) {
                         newChatExpanded = false
                         viewModel.newChat("workspace", workspace.ref)
@@ -105,10 +114,13 @@ fun ChatListScreen(
             }
         }
         error?.let { ListRow(title = it, trailing = "!") }
-        if (threads.isEmpty()) {
-            ListRow(title = "No chats yet", subtitle = "Tap New chat above")
-        } else {
-            threads.forEach { thread ->
+        // T-051 tri-state: Loading / Offline / genuine "No chats yet" — never
+        // a false empty while the fetches are in flight or the tunnel is down.
+        // D037: degradeTransport swallows offline failures into empty
+        // emissions, so loaded+empty+Degraded may be a fake empty —
+        // honest-first shows Offline instead of an empty list we can't confirm.
+        when {
+            state.threads.isNotEmpty() -> state.threads.forEach { thread ->
                 ListRow(
                     title = thread.title,
                     subtitle = listOfNotNull(thread.scopeLabel, thread.lastMessagePreview)
@@ -117,6 +129,21 @@ fun ChatListScreen(
                     onClick = { onOpenThread(thread.id) },
                 )
             }
+            !state.loaded && transport is TransportStatus.Degraded ->
+                ListRow(
+                    title = "Offline — server unreachable",
+                    subtitle = "Will load when connection returns",
+                )
+            !state.loaded -> ListRow(
+                title = "Loading chats…",
+                subtitle = tunnelPhaseSubtitle(tunnel),
+            )
+            transport is TransportStatus.Degraded ->
+                ListRow(
+                    title = "Offline — server unreachable",
+                    subtitle = "Can't confirm empty while offline",
+                )
+            else -> ListRow(title = "No chats yet", subtitle = "Tap New chat above")
         }
     }
 }
@@ -146,6 +173,14 @@ fun ChatThreadScreen(
     val proposedTopic by viewModel.proposedTopic.collectAsState()
     val topics by viewModel.topics.collectAsState()
     val workspaces by viewModel.workspaces.collectAsState()
+
+    // T-051: transport health from the app container (same route as the
+    // chat list) distinguishes Offline from Loading while this thread's
+    // history fetch is in flight.
+    val loaded by viewModel.loaded.collectAsState()
+    val transport by LocalAppContainer.current.transportStatus.collectAsState()
+    // T-051 (W2): same dial-vs-fetch subtitle as the chat list.
+    val tunnel by LocalAppContainer.current.tunnelState.collectAsState()
     var scopeExpanded by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
@@ -270,7 +305,28 @@ fun ChatThreadScreen(
                 }
             }
             if (messages.isEmpty()) {
-                item(key = "empty") { ListRow(title = "No messages", subtitle = "Write below") }
+                // T-051 tri-state: Loading / Offline / genuine "No messages" —
+                // never a false empty while the history fetch is in flight or
+                // the tunnel is down. Only renders when the transcript is
+                // empty, so existing conversations are untouched (sticky
+                // loaded also prevents a post-send refetch flash). Unlike the
+                // chat LIST there is no Degraded-empty amendment here: a
+                // zero-message thread is rare and the composer still renders,
+                // transport honesty is covered on the next open (b).
+                item(key = "empty") {
+                    when {
+                        !loaded && transport is TransportStatus.Degraded ->
+                            ListRow(
+                                title = "Offline — server unreachable",
+                                subtitle = "Will load when connection returns",
+                            )
+                        !loaded -> ListRow(
+                            title = "Loading messages…",
+                            subtitle = tunnelPhaseSubtitle(tunnel),
+                        )
+                        else -> ListRow(title = "No messages", subtitle = "Write below")
+                    }
+                }
             }
             itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
                 val isLast = index == messages.lastIndex
@@ -355,6 +411,22 @@ fun ChatThreadScreen(
         },
     )
 }
+
+/**
+ * T-051 (W2): phase-aware subtitle for loading rows — distinguishes the
+ * 1–10 s cold tunnel dial ("Connecting") from the fetch itself. Tunnel
+ * reads Down while an up() is in progress, so "not Up" means the dial is
+ * still pending; Error is never assigned today but maps to Connecting
+ * too (still no path). Null = no tunnel configured (fake/plain-remote
+ * mode): no dial can happen, so nothing is claimed. Static text only
+ * (e-ink).
+ */
+private fun tunnelPhaseSubtitle(tunnel: TunnelController.State?): String? =
+    when (tunnel) {
+        null -> null
+        TunnelController.State.Up -> "Fetching"
+        else -> "Connecting — secure tunnel"
+    }
 
 /**
  * One message. Monochrome sender coding: user = right-shifted bordered card,

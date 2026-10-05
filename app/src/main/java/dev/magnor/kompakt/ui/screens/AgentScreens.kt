@@ -28,12 +28,15 @@ import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.buttons.OutlinedButtonMMD
 import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
+import dev.magnor.kompakt.data.remote.TransportStatus
 import dev.magnor.kompakt.domain.AgentBackendInfo
 import dev.magnor.kompakt.domain.AgentEvent
 import dev.magnor.kompakt.domain.AgentRole
 import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.AgentRunKind
 import dev.magnor.kompakt.domain.AgentRunState
+import dev.magnor.kompakt.domain.AgentsSurface
+import dev.magnor.kompakt.ui.LocalAppContainer
 import dev.magnor.kompakt.ui.MarkdownText
 import dev.magnor.kompakt.voice.MicButton
 import dev.magnor.kompakt.voice.VoiceStatusText
@@ -81,75 +84,122 @@ fun AgentsListScreen(
     onOpenInbox: () -> Unit,
     viewModel: AgentsListViewModel = containerViewModel { AgentsListViewModel(it.agentRepository, it.now()) },
 ) {
-    val surface by viewModel.surface.collectAsState()
-    val runs by viewModel.runs.collectAsState()
+    val state by viewModel.state.collectAsState()
+
+    // T-051: transport health from the app container (established
+    // composition-local route — see VoiceUi) distinguishes Offline from
+    // Loading while the surface/runs fetches are in flight.
+    val transport by LocalAppContainer.current.transportStatus.collectAsState()
 
     AppScreen(title = "Agents") {
-        SectionLabel("Backends")
-        if (surface.backends.isEmpty()) {
-            ListRow(title = "No backends configured")
-        } else {
-            surface.backends.forEach { (name, info) ->
-                ListRow(
-                    title = name + if (name == surface.defaultBackend) " (default)" else "",
-                    subtitle = capSummary(info),
-                )
-            }
-        }
+        // T-051 I1: auth/protocol failures land in `error` with transport Ok —
+        // render the cause (already userMessage-shaped at the .catch) above
+        // everything; the Loading branch below must not claim a fetch is
+        // still in flight after the one-shot source flow has died.
+        state.error?.let { ListRow(title = it, trailing = "!") }
 
-        SectionLabel("Workers")
-        if (surface.agents.isEmpty()) {
-            ListRow(title = "No agents configured")
-        } else {
-            surface.agents.forEach { role ->
-                ListRow(
-                    title = role.name,
-                    subtitle = role.description,
-                    trailing = "@${role.backend}",
-                    onClick = { onOpenAgent(role.backend, role.name) },
-                )
+        // T-051 tri-state, data-first: landed rows always render — Loading /
+        // Offline / genuine empties — never a false "No backends configured"
+        // while a fetch is in flight or the tunnel is down. D037 amended
+        // empty rule: degradeTransport swallows offline failures into empty
+        // emissions, so loaded+empty+Degraded may be a fake empty —
+        // honest-first shows Offline instead of an empty list we can't
+        // confirm.
+        when {
+            state.runs.isNotEmpty() || state.surface.backends.isNotEmpty() || state.surface.agents.isNotEmpty() ->
+                AgentsListContent(state.surface, state.runs, onOpenAgent, onOpenRun, onOpenInbox)
+            state.error != null -> {
+                // The cause renders in the row above — nothing honest to add.
             }
+            !state.loaded && transport is TransportStatus.Degraded ->
+                ListRow(
+                    title = "Offline — server unreachable",
+                    subtitle = "Will load when connection returns",
+                )
+            !state.loaded -> ListRow(title = "Loading agents…")
+            transport is TransportStatus.Degraded ->
+                ListRow(
+                    title = "Offline — server unreachable",
+                    subtitle = "Can't confirm empty while offline",
+                )
+            else -> AgentsListContent(state.surface, state.runs, onOpenAgent, onOpenRun, onOpenInbox)
         }
+    }
+}
 
-        SectionLabel("Attention")
-        val waiting = runs.count { it.state == AgentRunState.WAITING_FOR_INPUT }
-        if (waiting > 0) {
+/** The five list sections — rendered identically for data and genuine empties. */
+@Composable
+private fun AgentsListContent(
+    surface: AgentsSurface,
+    runs: List<AgentRun>,
+    onOpenAgent: (backend: String, name: String) -> Unit,
+    onOpenRun: (runId: String) -> Unit,
+    onOpenInbox: () -> Unit,
+) {
+    SectionLabel("Backends")
+    if (surface.backends.isEmpty()) {
+        ListRow(title = "No backends configured")
+    } else {
+        surface.backends.forEach { (name, info) ->
             ListRow(
-                title = "$waiting ${if (waiting == 1) "run" else "runs"} waiting for input",
-                trailing = "!",
-                onClick = onOpenInbox,
+                title = name + if (name == surface.defaultBackend) " (default)" else "",
+                subtitle = capSummary(info),
             )
-        } else {
-            ListRow(title = "No runs need input")
         }
+    }
 
-        SectionLabel("Live runs")
-        val live = runs.filter { !it.state.isTerminal }
-        if (live.isEmpty()) {
-            ListRow(title = "Nothing running")
-        } else {
-            live.forEach { run ->
-                ListRow(
-                    title = run.displayTitle,
-                    subtitle = "${run.backend}/${run.agent} · ${run.kind.wire}",
-                    trailing = runGlyph(run.state),
-                    onClick = { onOpenRun(run.id) },
-                )
-            }
+    SectionLabel("Workers")
+    if (surface.agents.isEmpty()) {
+        ListRow(title = "No agents configured")
+    } else {
+        surface.agents.forEach { role ->
+            ListRow(
+                title = role.name,
+                subtitle = role.description,
+                trailing = "@${role.backend}",
+                onClick = { onOpenAgent(role.backend, role.name) },
+            )
         }
+    }
 
-        SectionLabel("Recent")
-        runs.filter { it.state.isTerminal }.take(5).forEach { run ->
+    SectionLabel("Attention")
+    val waiting = runs.count { it.state == AgentRunState.WAITING_FOR_INPUT }
+    if (waiting > 0) {
+        ListRow(
+            title = "$waiting ${if (waiting == 1) "run" else "runs"} waiting for input",
+            trailing = "!",
+            onClick = onOpenInbox,
+        )
+    } else {
+        ListRow(title = "No runs need input")
+    }
+
+    SectionLabel("Live runs")
+    val live = runs.filter { !it.state.isTerminal }
+    if (live.isEmpty()) {
+        ListRow(title = "Nothing running")
+    } else {
+        live.forEach { run ->
             ListRow(
                 title = run.displayTitle,
-                subtitle = run.resultSummary ?: run.prompt,
+                subtitle = "${run.backend}/${run.agent} · ${run.kind.wire}",
                 trailing = runGlyph(run.state),
                 onClick = { onOpenRun(run.id) },
             )
         }
-        if (runs.all { !it.state.isTerminal } && runs.isEmpty()) {
-            ListRow(title = "No finished runs yet")
-        }
+    }
+
+    SectionLabel("Recent")
+    runs.filter { it.state.isTerminal }.take(5).forEach { run ->
+        ListRow(
+            title = run.displayTitle,
+            subtitle = run.resultSummary ?: run.prompt,
+            trailing = runGlyph(run.state),
+            onClick = { onOpenRun(run.id) },
+        )
+    }
+    if (runs.all { !it.state.isTerminal } && runs.isEmpty()) {
+        ListRow(title = "No finished runs yet")
     }
 }
 
@@ -170,6 +220,12 @@ fun AgentDetailScreen(
     val feedback by viewModel.feedback.collectAsState()
     val dispatched by viewModel.lastDispatched.collectAsState()
     val workspaces by viewModel.workspaces.collectAsState()
+    val loaded by viewModel.loaded.collectAsState()
+
+    // T-051: transport health from the app container (established
+    // composition-local route — see VoiceUi) distinguishes Offline from
+    // Loading while the surface fetch is in flight.
+    val transport by LocalAppContainer.current.transportStatus.collectAsState()
 
     var prompt by remember { mutableStateOf("") }
     var projectRef by remember { mutableStateOf("") }
@@ -181,118 +237,132 @@ fun AgentDetailScreen(
     val supportsWorkspaces = info?.workspaceSelection == true
 
     AppScreen(title = agentName.ifBlank { "Agent" }, onBack = onBack) {
-        role?.let { r: AgentRole ->
-            DetailRow(label = "Role", value = r.name)
-            DetailRow(label = "Backend", value = r.backend)
-            DetailRow(label = "Steering", value = r.steering)
-            r.description.takeIf { it.isNotBlank() }?.let {
-                DetailRow(label = "Description", value = it)
-            }
-        } ?: ListRow(title = "Role not found on this backend")
-
-        info?.let { caps ->
-            SectionLabel("Backend capabilities")
-            DetailRow(label = "Sandboxed", value = yn(caps.sandboxed))
-            DetailRow(label = "Resumable", value = yn(caps.resumable))
-            DetailRow(label = "Live steering", value = yn(caps.liveSteering))
-            DetailRow(label = "Commands", value = yn(caps.commands))
-            DetailRow(label = "Event stream", value = yn(caps.eventStream))
-            DetailRow(label = "Project registration", value = yn(caps.projectRegistration))
-            DetailRow(label = "Workspace selection", value = yn(caps.workspaceSelection))
-        }
-
-        SectionLabel("New run")
-        // T-021: dictate the objective instead of typing it.
-        val voice = rememberVoiceInput { transcript ->
-            prompt = appendTranscript(prompt, transcript)
-        }
-        OutlinedTextField(
-            value = prompt,
-            onValueChange = { prompt = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { TextMMD("Objective") },
-            singleLine = false,
-            maxLines = 4,
-            trailingIcon = { MicButton(voice) },
-        )
-        VoiceStatusText(voice)
-        if (supportsWorkspaces) {
-            // T-022c picker: collapsed row → expanded list, ListRow primitives
-            // only (e-ink friendly, no new material deps). Optional by design —
-            // "none" dispatches without a workspace ref.
-            val selected = workspaces.firstOrNull { it.ref == workspaceRef }
-            ListRow(
-                title = "Workspace: ${selected?.label ?: "none"}",
-                subtitle = "Git checkout the run starts in",
-                trailing = if (pickerOpen) "▾" else "▸",
-                onClick = { pickerOpen = !pickerOpen },
-            )
-            if (pickerOpen) {
+        // T-051 tri-state: Loading / Offline before any content — never a
+        // false "Role not found on this backend" while the surface fetch is
+        // in flight or the tunnel is down. Loaded content is unchanged; a
+        // missing record keeps its existing row.
+        when {
+            !loaded && transport is TransportStatus.Degraded ->
                 ListRow(
-                    title = "None",
-                    subtitle = "No workspace — backend default",
-                    trailing = if (workspaceRef == null) "●" else null,
-                    onClick = { workspaceRef = null; pickerOpen = false },
+                    title = "Offline — server unreachable",
+                    subtitle = "Will load when connection returns",
                 )
-                workspaces.forEach { ws ->
+            !loaded -> ListRow(title = "Loading agent…")
+            else -> {
+                role?.let { r: AgentRole ->
+                    DetailRow(label = "Role", value = r.name)
+                    DetailRow(label = "Backend", value = r.backend)
+                    DetailRow(label = "Steering", value = r.steering)
+                    r.description.takeIf { it.isNotBlank() }?.let {
+                        DetailRow(label = "Description", value = it)
+                    }
+                } ?: ListRow(title = "Role not found on this backend")
+
+                info?.let { caps ->
+                    SectionLabel("Backend capabilities")
+                    DetailRow(label = "Sandboxed", value = yn(caps.sandboxed))
+                    DetailRow(label = "Resumable", value = yn(caps.resumable))
+                    DetailRow(label = "Live steering", value = yn(caps.liveSteering))
+                    DetailRow(label = "Commands", value = yn(caps.commands))
+                    DetailRow(label = "Event stream", value = yn(caps.eventStream))
+                    DetailRow(label = "Project registration", value = yn(caps.projectRegistration))
+                    DetailRow(label = "Workspace selection", value = yn(caps.workspaceSelection))
+                }
+
+                SectionLabel("New run")
+                // T-021: dictate the objective instead of typing it.
+                val voice = rememberVoiceInput { transcript ->
+                    prompt = appendTranscript(prompt, transcript)
+                }
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { TextMMD("Objective") },
+                    singleLine = false,
+                    maxLines = 4,
+                    trailingIcon = { MicButton(voice) },
+                )
+                VoiceStatusText(voice)
+                if (supportsWorkspaces) {
+                    // T-022c picker: collapsed row → expanded list, ListRow primitives
+                    // only (e-ink friendly, no new material deps). Optional by design —
+                    // "none" dispatches without a workspace ref.
+                    val selected = workspaces.firstOrNull { it.ref == workspaceRef }
                     ListRow(
-                        title = ws.label,
-                        subtitle = ws.ref,
-                        trailing = if (ws.ref == workspaceRef) "●" else null,
-                        onClick = { workspaceRef = ws.ref; pickerOpen = false },
+                        title = "Workspace: ${selected?.label ?: "none"}",
+                        subtitle = "Git checkout the run starts in",
+                        trailing = if (pickerOpen) "▾" else "▸",
+                        onClick = { pickerOpen = !pickerOpen },
+                    )
+                    if (pickerOpen) {
+                        ListRow(
+                            title = "None",
+                            subtitle = "No workspace — backend default",
+                            trailing = if (workspaceRef == null) "●" else null,
+                            onClick = { workspaceRef = null; pickerOpen = false },
+                        )
+                        workspaces.forEach { ws ->
+                            ListRow(
+                                title = ws.label,
+                                subtitle = ws.ref,
+                                trailing = if (ws.ref == workspaceRef) "●" else null,
+                                onClick = { workspaceRef = ws.ref; pickerOpen = false },
+                            )
+                        }
+                        if (workspaces.isEmpty()) {
+                            ListRow(title = "No workspaces discovered")
+                        }
+                    }
+                }
+                if (needsProject) {
+                    OutlinedTextField(
+                        value = projectRef,
+                        onValueChange = { projectRef = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        label = { TextMMD("Project ref (required)") },
+                        singleLine = true,
                     )
                 }
-                if (workspaces.isEmpty()) {
-                    ListRow(title = "No workspaces discovered")
+                ButtonMMD(
+                    onClick = {
+                        viewModel.dispatch(prompt, workspaceRef ?: projectRef.takeIf { needsProject })
+                        prompt = ""
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    enabled = prompt.isNotBlank() && (!needsProject || projectRef.isNotBlank()),
+                ) {
+                    TextMMD(if (info?.resumable == true) "Start session" else "Dispatch run")
                 }
-            }
-        }
-        if (needsProject) {
-            OutlinedTextField(
-                value = projectRef,
-                onValueChange = { projectRef = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                label = { TextMMD("Project ref (required)") },
-                singleLine = true,
-            )
-        }
-        ButtonMMD(
-            onClick = {
-                viewModel.dispatch(prompt, workspaceRef ?: projectRef.takeIf { needsProject })
-                prompt = ""
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            enabled = prompt.isNotBlank() && (!needsProject || projectRef.isNotBlank()),
-        ) {
-            TextMMD(if (info?.resumable == true) "Start session" else "Dispatch run")
-        }
-        feedback?.let { TextMMD(it, modifier = Modifier.padding(top = 8.dp)) }
+                feedback?.let { TextMMD(it, modifier = Modifier.padding(top = 8.dp)) }
 
-        // T-012: the dispatched run is a live path to its detail, not a text note.
-        dispatched?.let { run ->
-            ListRow(
-                title = "Dispatched: ${run.displayTitle}",
-                subtitle = "Tap to open",
-                trailing = runGlyph(run.state),
-                onClick = { onOpenRun(run.id) },
-            )
-        }
+                // T-012: the dispatched run is a live path to its detail, not a text note.
+                dispatched?.let { run ->
+                    ListRow(
+                        title = "Dispatched: ${run.displayTitle}",
+                        subtitle = "Tap to open",
+                        trailing = runGlyph(run.state),
+                        onClick = { onOpenRun(run.id) },
+                    )
+                }
 
-        SectionLabel("Runs")
-        if (runs.isEmpty()) {
-            ListRow(title = "No runs yet")
-        } else {
-            runs.forEach { run ->
-                ListRow(
-                    title = run.displayTitle,
-                    subtitle = run.resultSummary,
-                    trailing = runGlyph(run.state),
-                    onClick = { onOpenRun(run.id) },
-                )
+                SectionLabel("Runs")
+                if (runs.isEmpty()) {
+                    ListRow(title = "No runs yet")
+                } else {
+                    runs.forEach { run ->
+                        ListRow(
+                            title = run.displayTitle,
+                            subtitle = run.resultSummary,
+                            trailing = runGlyph(run.state),
+                            onClick = { onOpenRun(run.id) },
+                        )
+                    }
+                }
             }
         }
     }
@@ -330,6 +400,12 @@ fun AgentRunDetailScreen(
     val events by viewModel.events.collectAsState()
     val feedback by viewModel.feedback.collectAsState()
     val targets by viewModel.saveTargets.collectAsState()
+    val loaded by viewModel.loaded.collectAsState()
+
+    // T-051: transport health from the app container (established
+    // composition-local route — see VoiceUi) distinguishes Offline from
+    // Loading while the run fetch is in flight.
+    val transport by LocalAppContainer.current.transportStatus.collectAsState()
 
     var message by remember { mutableStateOf("") }
     var detailsOpen by remember { mutableStateOf(false) }
@@ -348,7 +424,20 @@ fun AgentRunDetailScreen(
         onBack = onBack,
         listState = listState,
         transcript = {
-            run?.let { r: AgentRun ->
+            // T-051 tri-state: Loading / Offline before any transcript
+            // content — never a premature "Run not found" while the run
+            // fetch is in flight or the tunnel is down. Loaded content is
+            // unchanged; a missing record keeps its existing row.
+            if (!loaded && transport is TransportStatus.Degraded) {
+                item(key = "offline") {
+                    ListRow(
+                        title = "Offline — server unreachable",
+                        subtitle = "Will load when connection returns",
+                    )
+                }
+            } else if (!loaded) {
+                item(key = "loading") { ListRow(title = "Loading run…") }
+            } else run?.let { r: AgentRun ->
                 // Status summary — one line instead of a metadata dashboard.
                 item(key = "status") {
                     CardMMD(Modifier.fillMaxWidth()) {

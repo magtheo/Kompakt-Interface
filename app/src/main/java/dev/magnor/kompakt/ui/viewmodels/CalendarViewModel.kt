@@ -48,6 +48,12 @@ class CalendarViewModel(
         val selectedDay: LocalDate? = null,
         val calendars: List<CalendarInfo> = emptyList(),
         val events: List<CalendarEvent> = emptyList(),
+        /**
+         * T-051: true once a window fetch has landed. Distinguishes
+         * Loading/Offline from a genuine empty agenda — sticky across
+         * month navigation so refetches never flash a Loading row.
+         */
+        val loaded: Boolean = false,
         val error: String? = null,
         /** Sticky one-line outcome of the last write (create/edit/delete). */
         val writeOutcome: String? = null,
@@ -123,7 +129,7 @@ class CalendarViewModel(
                 val events = calendarRepository.fetchWindow(from.toString(), to.toString())
                 // Ignore stale windows if the user navigated while fetching.
                 if (_state.value.month == month) {
-                    _state.update { it.copy(events = events, error = null) }
+                    _state.update { it.copy(events = events, loaded = true, error = null) }
                 }
             } catch (e: Exception) {
                 if (_state.value.month == month) {

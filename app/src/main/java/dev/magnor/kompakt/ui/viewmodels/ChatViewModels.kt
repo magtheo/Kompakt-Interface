@@ -24,8 +24,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
@@ -45,15 +47,25 @@ class ChatListViewModel(
     private val newRequestId: () -> RequestId,
     val now: Instant,
 ) : ViewModel() {
-    val threads: StateFlow<List<ChatThread>> = chatRepository.observeThreads()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** T-022d: reference data for the new-chat scope picker. */
-    val topics: StateFlow<List<ChatTopic>> = topicRepository.observeTopics()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /**
+     * T-051: one honest list state (T-024 pattern). `combine` waits for all
+     * three one-shot fetches, so `loaded` flips only when the list is
+     * actually renderable — Loading, never a false "No chats yet" mid-fetch.
+     */
+    data class ChatListUiState(
+        val loaded: Boolean = false,
+        val threads: List<ChatThread> = emptyList(),
+        val topics: List<ChatTopic> = emptyList(),
+        val workspaces: List<Workspace> = emptyList(),
+    )
 
-    val workspaces: StateFlow<List<Workspace>> = workspaceRepository.observeWorkspaces()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val state: StateFlow<ChatListUiState> = combine(
+        chatRepository.observeThreads(),
+        topicRepository.observeTopics(),
+        workspaceRepository.observeWorkspaces(),
+    ) { t, tp, w -> ChatListUiState(loaded = true, threads = t, topics = tp, workspaces = w) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatListUiState())
 
     private val _created = MutableStateFlow<EntityId?>(null)
 
@@ -146,6 +158,22 @@ class ChatThreadViewModel(
         val fetchedIds = fetched.mapTo(HashSet()) { it.id }
         fetched + extra.filter { it.id !in fetchedIds }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * T-051: true once this thread's message fetch has landed — sticky across
+     * refresh ticks, so post-send refetches never flash a Loading row over an
+     * existing conversation (same rationale as Calendar's sticky loaded).
+     * Derived from the raw fetch, not from [messages], whose `emptyList()`
+     * stateIn initial would flip it before anything landed. A failed fetch
+     * never flips it either way: first fetch → stays false; refetch after
+     * data → stays true. Transport honesty is TransportStatus's job (D037),
+     * so the loaded chain swallows rather than crashes the sharing.
+     */
+    val loaded: StateFlow<Boolean> = refreshTick
+        .flatMapLatest { chatRepository.observeMessages(threadId) }
+        .map { true }
+        .catch { }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** T-022d: reference data for the header scope picker. */
     val topics: StateFlow<List<ChatTopic>> = topicRepository.observeTopics()
