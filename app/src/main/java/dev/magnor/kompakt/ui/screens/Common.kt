@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
@@ -91,6 +92,9 @@ fun SectionLabel(text: String) {
     )
 }
 
+private const val TITLE_MAX_LINES = 2
+private const val SUBTITLE_MAX_LINES = 2
+
 @Composable
 fun ListRow(
     title: String,
@@ -100,13 +104,16 @@ fun ListRow(
     secondary: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
+    // Tappable rows lead to a detail screen, so their text can be capped;
+    // static rows (errors, notices, feedback) have nowhere else to be read
+    // in full and stay untruncated.
     if (onClick != null) {
         CardMMD(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            ListRowContent(title, subtitle, trailing, secondary)
+            ListRowContent(title, subtitle, trailing, secondary, capLines = true)
         }
     } else {
         CardMMD(modifier = Modifier.fillMaxWidth()) {
-            ListRowContent(title, subtitle, trailing, secondary)
+            ListRowContent(title, subtitle, trailing, secondary, capLines = false)
         }
     }
 }
@@ -121,7 +128,13 @@ fun EmptyState(title: String, hint: String? = null) {
 }
 
 @Composable
-private fun ListRowContent(title: String, subtitle: String?, trailing: String?, secondary: Boolean = false) {
+private fun ListRowContent(
+    title: String,
+    subtitle: String?,
+    trailing: String?,
+    secondary: Boolean = false,
+    capLines: Boolean = false,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -132,9 +145,15 @@ private fun ListRowContent(title: String, subtitle: String?, trailing: String?, 
             TextMMD(
                 text = title,
                 fontWeight = if (secondary) FontWeight.Normal else FontWeight.SemiBold,
+                maxLines = if (capLines) TITLE_MAX_LINES else Int.MAX_VALUE,
+                overflow = TextOverflow.Ellipsis,
             )
             if (subtitle != null) {
-                TextMMD(text = subtitle)
+                TextMMD(
+                    text = subtitle,
+                    maxLines = if (capLines) SUBTITLE_MAX_LINES else Int.MAX_VALUE,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
         if (trailing != null) {
