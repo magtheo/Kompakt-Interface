@@ -138,7 +138,7 @@ fun CalendarScreen(
                         subtitle = "Will load when connection returns",
                     )
                 !state.loaded -> ListRow(title = "Loading events…")
-                else -> TextMMD("No events")
+                else -> EmptyState("No events", "Nothing scheduled this day")
             }
             OutlinedButtonMMD(
                 onClick = { onNewEvent(selected) },

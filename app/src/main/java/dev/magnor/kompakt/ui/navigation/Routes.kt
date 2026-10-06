@@ -14,6 +14,13 @@ object Routes {
     const val TODAY = "today"
     const val CHAT_LIST = "chat"
     const val CHAT_THREAD = "chat/{threadId}"
+
+    /**
+     * Unsaved new chat: no server thread exists until the first send.
+     * Literal prefix differs from CHAT_THREAD so "chat/{threadId}" never
+     * captures it.
+     */
+    const val CHAT_NEW = "chatnew?scopeType={scopeType}&scopeRef={scopeRef}&label={label}"
     const val AGENTS_LIST = "agents"
     const val AGENT_DETAIL = "agents/{backend}/{agentName}"
     const val AGENT_RUN_DETAIL = "runs/{runId}"
@@ -56,9 +63,9 @@ object Routes {
     fun isTransientSurface(route: String?): Boolean =
         route != null && route in transientSurfaces
 
-    /** All screen patterns — exactly one entry per screen (24). */
+    /** All screen patterns — exactly one entry per screen (25). */
     val all: List<String> = listOf(
-        TODAY, CHAT_LIST, CHAT_THREAD, AGENTS_LIST, AGENT_DETAIL,
+        TODAY, CHAT_LIST, CHAT_THREAD, CHAT_NEW, AGENTS_LIST, AGENT_DETAIL,
         AGENT_RUN_DETAIL, MORE, ORGANIZE, PROJECTS, PROJECT_DETAIL, AREAS,
         TASKS_PATTERN, NOTES, NOTE_EDITOR, INBOX, ITEM_DETAIL, CAPTURE,
         CALENDAR, EVENT_DETAIL, EVENT_EDITOR, SETTINGS, DIAGNOSTICS,
@@ -66,6 +73,19 @@ object Routes {
     )
 
     fun chatThread(id: String) = "chat/$id"
+
+    private fun enc(v: String): String =
+        java.net.URLEncoder.encode(v, "UTF-8").replace("+", "%20")
+
+    /** General chat when [scopeType] is null; [label] is display-only. */
+    fun chatNew(scopeType: String? = null, scopeRef: String? = null, label: String? = null): String {
+        val args = listOfNotNull(
+            scopeType?.let { "scopeType=${enc(it)}" },
+            scopeRef?.let { "scopeRef=${enc(it)}" },
+            label?.let { "label=${enc(it)}" },
+        )
+        return if (args.isEmpty()) "chatnew" else "chatnew?" + args.joinToString("&")
+    }
     fun agent(backend: String, name: String) = "agents/$backend/$name"
     fun run(id: String) = "runs/$id"
 

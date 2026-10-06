@@ -148,8 +148,18 @@ class AgentDetailViewModel(
     private val _lastDispatched = MutableStateFlow<AgentRun?>(null)
     val lastDispatched: StateFlow<AgentRun?> = _lastDispatched.asStateFlow()
 
+    /**
+     * True while a dispatch is in flight. Guards double-taps (each tap would
+     * mint a fresh request id and start a second run) and drives the
+     * button's "Dispatching…" label — e-ink gives no other tap feedback.
+     */
+    private val _dispatching = MutableStateFlow(false)
+    val dispatching: StateFlow<Boolean> = _dispatching.asStateFlow()
+
     fun dispatch(prompt: String, projectRef: String?) {
-        if (prompt.isBlank()) return
+        if (prompt.isBlank() || _dispatching.value) return
+        _dispatching.value = true
+        _feedback.value = null
         viewModelScope.launch {
             runCatching {
                 agentRepository.dispatch(
@@ -168,6 +178,7 @@ class AgentDetailViewModel(
             }.onFailure { e ->
                 _feedback.value = "Dispatch failed: ${e.message}"
             }
+            _dispatching.value = false
         }
     }
 }

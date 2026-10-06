@@ -219,6 +219,7 @@ fun AgentDetailScreen(
     val runs by viewModel.runs.collectAsState()
     val feedback by viewModel.feedback.collectAsState()
     val dispatched by viewModel.lastDispatched.collectAsState()
+    val dispatching by viewModel.dispatching.collectAsState()
     val workspaces by viewModel.workspaces.collectAsState()
     val loaded by viewModel.loaded.collectAsState()
 
@@ -231,6 +232,9 @@ fun AgentDetailScreen(
     var projectRef by remember { mutableStateOf("") }
     var workspaceRef by remember { mutableStateOf<String?>(null) }
     var pickerOpen by remember { mutableStateOf(false) }
+    // Clear the draft only once the dispatch succeeded — a failure keeps the
+    // typed prompt so it can be retried instead of retyped.
+    LaunchedEffect(dispatched) { if (dispatched != null) prompt = "" }
     val needsProject = info?.projectRegistration == true
     // T-022c: backends that advertise workspace_selection get a picker of
     // server-known git checkouts instead of free-text (refs stay opaque, D023).
@@ -329,14 +333,19 @@ fun AgentDetailScreen(
                 ButtonMMD(
                     onClick = {
                         viewModel.dispatch(prompt, workspaceRef ?: projectRef.takeIf { needsProject })
-                        prompt = ""
                     },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp),
-                    enabled = prompt.isNotBlank() && (!needsProject || projectRef.isNotBlank()),
+                    enabled = !dispatching && prompt.isNotBlank() && (!needsProject || projectRef.isNotBlank()),
                 ) {
-                    TextMMD(if (info?.resumable == true) "Start session" else "Dispatch run")
+                    TextMMD(
+                        when {
+                            dispatching -> "Dispatching…"
+                            info?.resumable == true -> "Start session"
+                            else -> "Dispatch run"
+                        },
+                    )
                 }
                 feedback?.let { TextMMD(it, modifier = Modifier.padding(top = 8.dp)) }
 

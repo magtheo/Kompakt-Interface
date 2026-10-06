@@ -16,10 +16,11 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -90,7 +91,7 @@ fun TodayScreen(
         actions = {
             // D030 entry, icon-only — minimal footprint next to the bell.
             IconButton(onClick = onOpenCalendar) {
-                Icon(Icons.Filled.CalendarMonth, contentDescription = "Calendar")
+                Icon(Icons.Filled.DateRange, contentDescription = "Calendar")
             }
             if (showInboxAction) {
                 IconButton(onClick = onOpenInbox) {
@@ -121,12 +122,14 @@ fun TodayScreen(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
                             .clickable(onClick = onOpenSettings)
+                            .minimumInteractiveComponentSize()
                             .padding(8.dp),
                     )
                     TextMMD(
                         text = "✕",
                         modifier = Modifier
                             .clickable { nudgeDismissed.value = true }
+                            .minimumInteractiveComponentSize()
                             .padding(8.dp),
                     )
                 }
@@ -246,6 +249,7 @@ private fun RowScope.TodayTabLabel(text: String, selected: Boolean, onClick: () 
         Modifier
             .weight(1f)
             .clickable(onClick = onClick)
+            .minimumInteractiveComponentSize()
             .padding(horizontal = 2.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

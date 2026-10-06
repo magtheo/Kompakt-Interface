@@ -13,7 +13,6 @@
          inexact fallback otherwise (see ReminderScheduler). -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- T-021: Phase 11 voice input — runtime permission, prompted on
          first mic tap (see MicButton). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -93,7 +92,7 @@
         <!-- T-044: alarms die at reboot — re-arm the window cadence. -->
         <receiver
             android:name=".sync.BootCompletedReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

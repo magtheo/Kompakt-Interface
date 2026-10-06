@@ -60,7 +60,7 @@ fun NotificationsScreen(onBack: () -> Unit) {
         },
     ) {
         if (items.isEmpty()) {
-            TextMMD("No notifications")
+            EmptyState("No notifications", "New ones from other apps appear here")
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items.forEach { item ->
@@ -98,12 +98,12 @@ fun AppSwitcherScreen(onBack: () -> Unit) {
     AppScreen(title = "Apps", onBack = onBack) {
         val current = rows
         when {
-            current == null -> TextMMD("Loading…")
+            current == null -> EmptyState("Loading…")
             current.isEmpty() ->
-                TextMMD(
-                    "No recent apps. " +
-                        "(Empty list usually means the usage-access grant was lost — " +
-                        "re-run the ADB appops grant.)"
+                EmptyState(
+                    "No recent apps",
+                    "An empty list usually means the usage-access grant was lost — " +
+                        "re-run the ADB appops grant.",
                 )
             else ->
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

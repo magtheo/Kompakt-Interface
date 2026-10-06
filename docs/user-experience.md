@@ -227,30 +227,49 @@ Implemented layout rules (T-013/T-014/T-015):
 - transcript scrolls under a fixed top bar; the composer never
   lives below the fold,
 - monochrome sender coding: user = right-shifted bordered card,
-  semi-bold; assistant = full-width plain text,
-- every message carries a `Sender · HH:mm` meta line; delivery
-  state rides on glyphs (pending/failed), never color,
+  semi-bold; assistant = plain full-width text with no card, so a long
+  thread does not read as a stack of boxes,
+- the `Sender · HH:mm` meta line is quiet: shown on the first message,
+  after a pause of 10+ minutes, while pending/failed (delivery state
+  rides on glyphs, never color), or when the message is tapped,
 - one compact composer row: field + send icon button beside it
   (bottom-aligned so it tracks the last line as the draft grows),
   placeholder instead of a floating label,
-- tapping a message opens its action row:
-  - **Edit** — rewrite the conversation from here,
-  - **Revert to here** — drop everything after it,
+- tapping a message reveals its meta and one "Actions" row; behind it:
+  - **Edit** — rewrite the conversation from here (fills the composer;
+    nothing is dropped until Send),
+  - **Save as note** — assistant replies only,
   - **Regenerate** — drop the reply and ask again,
-  all destructive, no branches (see D026),
-- a Jump-to-message inline index provides fast navigation in long
-  threads,
+  - **Revert to here** — drop everything after it,
+  Regenerate and Revert ask for an inline confirm first; both are
+  destructive with no branches (see D026),
+- thread info lives behind one top-bar button (ⓘ): the scope row with
+  its re-scope picker and a Jump-to-message index for long threads; a
+  dot beside the button marks a pending topic suggestion. The panel is
+  height-bounded and scrollable,
+- status is one quiet line, not a card: "Assistant is replying…",
+  "Workspace turn running…", and dismissible notices; empty threads and
+  the unsent new-chat screen show no placeholder card (the composer and
+  keyboard are the prompt),
 - threads auto-title from the first user message server-side;
   explicit titles are never overwritten.
 
 Scope tiers (T-022d):
 
 - every thread has a scope — **General**, **Topic** (vault-seeded), or
-  **Workspace** (repo-bound) — shown as a scope row under the thread
-  header and as a label on list rows,
-- the new-chat action expands into a picker (same pattern as the agent
-  workspace picker): General, one row per topic, one row per known
-  workspace,
+  **Workspace** (repo-bound) — shown in the thread info panel (top-bar
+  button) and as a label on list rows,
+- the composer stays editable while a reply is pending (only Send is
+  gated); if the pending send fails, its text is restored ahead of
+  anything typed meanwhile,
+- **New chat** opens an empty, unsaved composer in one tap (General is
+  the everyday chat, D034) with the keyboard up; a secondary "New chat
+  in a topic or workspace…" row expands the picker (one row per topic,
+  one per known workspace) and opens the same composer with that scope,
+- nothing is created server-side until the first send: Send creates the
+  thread (create request id reused across retries) and the thread opens
+  already sending that message. Backing out of an unsent chat leaves no
+  empty thread behind; a failed create keeps the draft and retries,
 - sending on a General thread may surface a "Move to \<topic\>?" chip —
   Move applies the scope (explicit tap), Not now dismisses it locally;
   the chip never re-routes a message by itself,

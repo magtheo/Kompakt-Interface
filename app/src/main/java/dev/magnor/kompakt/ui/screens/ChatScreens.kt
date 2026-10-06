@@ -1,17 +1,23 @@
 package dev.magnor.kompakt.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,9 +29,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.datetime.Instant
 import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
@@ -47,6 +56,8 @@ import dev.magnor.kompakt.ui.relativeTo
 import dev.magnor.kompakt.ui.timeOfDay
 import dev.magnor.kompakt.ui.viewmodels.ChatComposerMode
 import dev.magnor.kompakt.ui.viewmodels.ChatListViewModel
+import dev.magnor.kompakt.ui.viewmodels.NewChatViewModel
+import dev.magnor.kompakt.ui.viewmodels.NewChatState
 import dev.magnor.kompakt.ui.viewmodels.ChatSendState
 import dev.magnor.kompakt.ui.viewmodels.ChatThreadViewModel
 import kotlinx.coroutines.launch
@@ -55,13 +66,15 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatListScreen(
     onOpenThread: (EntityId) -> Unit,
+    /** Opens the unsaved new-chat screen; null scope = General. */
+    onNewChat: (scopeType: String?, scopeRef: String?, label: String?) -> Unit,
     viewModel: ChatListViewModel = containerViewModel {
-        ChatListViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it::nextRequestId, it.now())
+        ChatListViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it.now())
     },
 ) {
     val state by viewModel.state.collectAsState()
-    val created by viewModel.created.collectAsState()
-    val error by viewModel.error.collectAsState()
+    val topics = state.topics
+    val workspaces = state.workspaces
 
     // T-051: transport health from the app container (established
     // composition-local route — see VoiceUi) distinguishes Offline from
@@ -72,34 +85,35 @@ fun ChatListScreen(
     val tunnel by LocalAppContainer.current.tunnelState.collectAsState()
     var newChatExpanded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(created) {
-        created?.let { id ->
-            viewModel.consumeCreated()
-            onOpenThread(id)
-        }
-    }
-
     AppScreen(title = "Chats") {
         // T-022d: chat scope picker — General (no context), vault topics, or
         // workspaces (OpenCode sessions). Choice at creation only; the
         // thread header can re-scope later.
+        // General is the everyday chat (D034): one tap straight into it.
+        // Scoped chats (topic / workspace) live behind the secondary row.
         ListRow(
             title = "New chat",
-            subtitle = if (newChatExpanded) null else "Start a conversation",
-            trailing = if (newChatExpanded) "▾" else "▸",
-            onClick = { newChatExpanded = !newChatExpanded },
-        )
-        if (newChatExpanded) {
-            ListRow(title = "General", subtitle = "No topic context") {
+            subtitle = "General — no topic context",
+            trailing = "+",
+            onClick = {
                 newChatExpanded = false
-                viewModel.newChat()
-            }
-            if (state.topics.isNotEmpty()) {
+                onNewChat(null, null, null)
+            },
+        )
+        if (topics.isNotEmpty() || workspaces.isNotEmpty()) {
+            ListRow(
+                title = "New chat in a topic or workspace…",
+                trailing = if (newChatExpanded) "▾" else "▸",
+                onClick = { newChatExpanded = !newChatExpanded },
+            )
+        }
+        if (newChatExpanded) {
+            if (topics.isNotEmpty()) {
                 SectionLabel("Topics")
                 state.topics.forEach { topic ->
                     ListRow(title = topic.label) {
                         newChatExpanded = false
-                        viewModel.newChat("topic", topic.id)
+                        onNewChat("topic", topic.id, topic.label)
                     }
                 }
             }
@@ -108,12 +122,11 @@ fun ChatListScreen(
                 state.workspaces.forEach { workspace ->
                     ListRow(title = workspace.label, subtitle = workspace.ref) {
                         newChatExpanded = false
-                        viewModel.newChat("workspace", workspace.ref)
+                        onNewChat("workspace", workspace.ref, workspace.label)
                     }
                 }
             }
         }
-        error?.let { ListRow(title = it, trailing = "!") }
         // T-051 tri-state: Loading / Offline / genuine "No chats yet" — never
         // a false empty while the fetches are in flight or the tunnel is down.
         // D037: degradeTransport swallows offline failures into empty
@@ -143,9 +156,92 @@ fun ChatListScreen(
                     title = "Offline — server unreachable",
                     subtitle = "Can't confirm empty while offline",
                 )
-            else -> ListRow(title = "No chats yet", subtitle = "Tap New chat above")
+            else -> EmptyState("No chats yet", "Tap New chat to start")
         }
     }
+}
+
+/**
+ * Unsaved new chat: an empty composer, nothing created server-side until
+ * the first send (see [NewChatViewModel]). The keyboard opens straight
+ * away — the only thing to do here is type.
+ */
+@Composable
+fun NewChatScreen(
+    scopeType: String?,
+    scopeRef: String?,
+    label: String?,
+    onBack: () -> Unit,
+    onCreated: (EntityId) -> Unit,
+    viewModel: NewChatViewModel = containerViewModel(key = "chatnew-$scopeType-$scopeRef") {
+        NewChatViewModel(it.chatRepository, it.pendingFirstMessages, scopeType, scopeRef, it::nextRequestId)
+    },
+) {
+    val draft by viewModel.draft.collectAsState()
+    val state by viewModel.state.collectAsState()
+    val created by viewModel.created.collectAsState()
+    val creating = state is NewChatState.Creating
+    val focus = remember { FocusRequester() }
+
+    LaunchedEffect(created) {
+        created?.let { id ->
+            viewModel.consumeCreated()
+            onCreated(id)
+        }
+    }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+
+    ChatScaffold(
+        title = "New chat · " + when (scopeType) {
+            null -> "General"
+            else -> label ?: scopeRef ?: scopeType
+        },
+        onBack = onBack,
+        transcript = {
+            (state as? NewChatState.Failed)?.let { failed ->
+                item(key = "failed") {
+                    Column {
+                        ListRow(
+                            title = failed.reason,
+                            subtitle = "Draft kept in the composer — press Send to retry",
+                            trailing = "!",
+                        )
+                        ButtonMMD(
+                            onClick = viewModel::dismissError,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { TextMMD("Dismiss") }
+                    }
+                }
+            }
+        },
+        composer = {
+            val voice = rememberVoiceInput { transcript ->
+                viewModel.onDraftChange(appendTranscript(draft, transcript))
+            }
+            Column {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = viewModel::onDraftChange,
+                        modifier = Modifier.weight(1f).focusRequester(focus),
+                        placeholder = { TextMMD("Message") },
+                        singleLine = false,
+                        maxLines = 6,
+                        trailingIcon = { MicButton(voice) },
+                    )
+                    IconButton(
+                        onClick = viewModel::send,
+                        enabled = draft.isNotBlank() && !creating,
+                        modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                    }
+                }
+                if (creating) TextMMD("Starting chat…", fontSize = 12.sp)
+                VoiceStatusText(voice)
+            }
+        },
+    )
 }
 
 /**
@@ -161,7 +257,7 @@ fun ChatThreadScreen(
     threadId: EntityId,
     onBack: () -> Unit,
     viewModel: ChatThreadViewModel = containerViewModel(key = "chat-$threadId") {
-        ChatThreadViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it.noteRepository, threadId, it::nextRequestId, it.clock)
+        ChatThreadViewModel(it.chatRepository, it.topicRepository, it.workspaceRepository, it.noteRepository, threadId, it::nextRequestId, it.clock, it.pendingFirstMessages.take(threadId))
     },
 ) {
     val thread by viewModel.thread.collectAsState()
@@ -173,6 +269,7 @@ fun ChatThreadScreen(
     val proposedTopic by viewModel.proposedTopic.collectAsState()
     val topics by viewModel.topics.collectAsState()
     val workspaces by viewModel.workspaces.collectAsState()
+    var infoOpen by remember { mutableStateOf(false) }
 
     // T-051: transport health from the app container (same route as the
     // chat list) distinguishes Offline from Loading while this thread's
@@ -189,12 +286,13 @@ fun ChatThreadScreen(
     var openMessageId by remember { mutableStateOf<EntityId?>(null) }
 
     val sending = sendState is ChatSendState.Sending
-    // Item 0 = jump header; messages follow; one trailing status item.
-    val lastItem = if (messages.isEmpty()) 0 else messages.size - 1 + 1 +
+    // Items: messages 0..n-1, then at most one trailing status item.
+    val lastItem = if (messages.isEmpty()) 0 else messages.size - 1 +
         (if (sending || sendState is ChatSendState.Failed) 1 else 0)
     LaunchedEffect(messages.size, sending, sendState) {
-        if (listState.layoutInfo.totalItemsCount > 0) {
-            runCatching { listState.scrollToItem(lastItem) }
+        val total = listState.layoutInfo.totalItemsCount
+        if (total > 0) {
+            runCatching { listState.scrollToItem(lastItem.coerceAtMost(total - 1)) }
         }
     }
 
@@ -202,57 +300,95 @@ fun ChatThreadScreen(
         title = thread?.title ?: "Chat",
         onBack = onBack,
         listState = listState,
+        // Thread info (scope, re-scope, jump) lives behind one top-bar
+        // button; the dot marks a pending topic suggestion.
+        actions = {
+            IconButton(onClick = { infoOpen = !infoOpen }) {
+                Icon(Icons.Filled.Info, contentDescription = "Chat info")
+            }
+            if (proposedTopic != null) TextMMD("●", modifier = Modifier.padding(end = 8.dp))
+        },
         header = {
-            // T-022d: scope row — shows the thread's context (general/topic/
-            // workspace); expands to re-scope. The propose chip only ever
-            // appears on unscoped threads and applies on explicit Move.
-            ListRow(
-                title = "Scope: ${thread?.scopeLabel ?: "General"}",
-                subtitle = when (thread?.scopeType) {
-                    null -> "Tap to add topic or workspace context"
-                    "topic" -> "Topic"
-                    "workspace" -> "Workspace · auto-commits each turn"
-                    else -> thread?.scopeType
-                },
-                trailing = if (scopeExpanded) "▾" else "▸",
-                onClick = { scopeExpanded = !scopeExpanded },
-            )
-            if (scopeExpanded) {
-                ListRow(title = "General", subtitle = "No topic context") {
-                    scopeExpanded = false
-                    viewModel.setScope(null, null)
-                }
-                if (topics.isNotEmpty()) {
-                    SectionLabel("Topics")
-                    topics.forEach { topic ->
-                        ListRow(
-                            title = topic.label,
-                            trailing = if (thread?.scopeType == "topic" && thread?.scopeRef == topic.id) "●" else null,
-                        ) {
+            if (infoOpen) {
+                // Bounded + scrollable: a long jump index must not push the
+                // transcript and composer off screen.
+                Column(
+                    Modifier
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                ) {
+                    // T-022d: scope — the thread's context (general/topic/
+                    // workspace); expands to re-scope. Always explicit.
+                    ListRow(
+                        title = "Scope: ${thread?.scopeLabel ?: "General"}",
+                        subtitle = when (thread?.scopeType) {
+                            null -> "Tap to add topic or workspace context"
+                            "topic" -> "Topic"
+                            "workspace" -> "Workspace · auto-commits each turn"
+                            else -> thread?.scopeType
+                        },
+                        trailing = if (scopeExpanded) "▾" else "▸",
+                        onClick = { scopeExpanded = !scopeExpanded },
+                    )
+                    if (scopeExpanded) {
+                        ListRow(title = "General", subtitle = "No topic context") {
                             scopeExpanded = false
-                            viewModel.setScope("topic", topic.id)
+                            viewModel.setScope(null, null)
+                        }
+                        if (topics.isNotEmpty()) {
+                            SectionLabel("Topics")
+                            topics.forEach { topic ->
+                                ListRow(
+                                    title = topic.label,
+                                    trailing = if (thread?.scopeType == "topic" && thread?.scopeRef == topic.id) "●" else null,
+                                ) {
+                                    scopeExpanded = false
+                                    viewModel.setScope("topic", topic.id)
+                                }
+                            }
+                        }
+                        if (workspaces.isNotEmpty()) {
+                            SectionLabel("Workspaces")
+                            workspaces.forEach { workspace ->
+                                ListRow(
+                                    title = workspace.label,
+                                    subtitle = workspace.ref,
+                                    trailing = if (thread?.scopeType == "workspace" && thread?.scopeRef == workspace.ref) "●" else null,
+                                ) {
+                                    scopeExpanded = false
+                                    viewModel.setScope("workspace", workspace.ref)
+                                }
+                            }
                         }
                     }
-                }
-                if (workspaces.isNotEmpty()) {
-                    SectionLabel("Workspaces")
-                    workspaces.forEach { workspace ->
+                    if (messages.size > 1) {
                         ListRow(
-                            title = workspace.label,
-                            subtitle = workspace.ref,
-                            trailing = if (thread?.scopeType == "workspace" && thread?.scopeRef == workspace.ref) "●" else null,
-                        ) {
-                            scopeExpanded = false
-                            viewModel.setScope("workspace", workspace.ref)
+                            title = "Jump to message",
+                            trailing = if (jumpOpen) "▾" else "▸",
+                            onClick = { jumpOpen = !jumpOpen },
+                        )
+                        if (jumpOpen) {
+                            messages.forEachIndexed { index, message ->
+                                ListRow(
+                                    title = "#${index + 1} · ${mdPreview(message.content, 42)}",
+                                    subtitle = "${if (message.role == MessageRole.USER) "You" else "Assistant"} · ${message.createdAt.timeOfDay()}",
+                                    onClick = {
+                                        jumpOpen = false
+                                        infoOpen = false
+                                        scope.launch { listState.scrollToItem(index) }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
             }
             if (thread?.pendingReply == true) {
-                ListRow(
-                    title = "Workspace turn still running",
-                    subtitle = "Checking every 15 s — reply lands here",
-                    trailing = "…",
+                TextMMD(
+                    text = "Workspace turn running… checking every 15 s",
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
             proposedTopic?.let { topic ->
@@ -273,37 +409,21 @@ fun ChatThreadScreen(
                     }
                 }
             }
-            if (notice != null) {
-                ListRow(
-                    title = notice!!,
-                    trailing = "✕",
-                    onClick = viewModel::dismissNotice,
-                )
+            notice?.let { text ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = viewModel::dismissNotice)
+                        .minimumInteractiveComponentSize()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    TextMMD(text = text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    TextMMD(text = "✕", fontSize = 13.sp)
+                }
             }
         },
         transcript = {
-            if (messages.size > 1) {
-                item(key = "jump") {
-                    Column {
-                        ButtonMMD(
-                            onClick = { jumpOpen = !jumpOpen },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { TextMMD(if (jumpOpen) "Jump ▴" else "Jump to message ▾") }
-                        if (jumpOpen) {
-                            messages.forEachIndexed { index, message ->
-                                ListRow(
-                                    title = "#${index + 1} · ${mdPreview(message.content, 42)}",
-                                    subtitle = "${if (message.role == MessageRole.USER) "You" else "Assistant"} · ${message.createdAt.timeOfDay()}",
-                                    onClick = {
-                                        jumpOpen = false
-                                        scope.launch { listState.scrollToItem(index + 1) }
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
             if (messages.isEmpty()) {
                 // T-051 tri-state: Loading / Offline / genuine "No messages" —
                 // never a false empty while the history fetch is in flight or
@@ -332,6 +452,8 @@ fun ChatThreadScreen(
                 val isLast = index == messages.lastIndex
                 ChatMessageRow(
                     message = message,
+                    previousAt = messages.getOrNull(index - 1)?.createdAt,
+                    messagesAfter = messages.size - 1 - index,
                     expanded = openMessageId == message.id,
                     canRegenerate = isLast && message.role == MessageRole.ASSISTANT,
                     onClick = { openMessageId = if (openMessageId == message.id) null else message.id },
@@ -342,7 +464,7 @@ fun ChatThreadScreen(
                 )
             }
             if (sending) {
-                item(key = "sending") { ListRow(title = "Assistant is replying…", trailing = "…") }
+                item(key = "sending") { TextMMD("Assistant is replying…", fontSize = 13.sp) }
             }
             (sendState as? ChatSendState.Failed)?.let { failed ->
                 item(key = "failed") {
@@ -390,7 +512,6 @@ fun ChatThreadScreen(
                         onValueChange = viewModel::onDraftChange,
                         modifier = Modifier.weight(1f),
                         placeholder = { TextMMD(if (editing != null) "Edited message" else "Message") },
-                        enabled = !sending,
                         singleLine = false,
                         maxLines = 6,
                         trailingIcon = { MicButton(voice) },
@@ -412,6 +533,9 @@ fun ChatThreadScreen(
     )
 }
 
+/** Show a message's time only after a pause this long (or on the first one). */
+private const val TIME_GAP_SECONDS = 10 * 60L
+
 /**
  * T-051 (W2): phase-aware subtitle for loading rows — distinguishes the
  * 1–10 s cold tunnel dial ("Connecting") from the fetch itself. Tunnel
@@ -430,12 +554,21 @@ private fun tunnelPhaseSubtitle(tunnel: TunnelController.State?): String? =
 
 /**
  * One message. Monochrome sender coding: user = right-shifted bordered card,
- * semi-bold; assistant = full-width plain text. Timestamp sits in the meta
- * line; pending/failed glyphs carry delivery state.
+ * semi-bold; assistant = plain full-width text (no card — a long thread
+ * should not read as a stack of boxes). The sender/time meta line is quiet
+ * by default: shown on the first message, after a pause of [TIME_GAP_SECONDS],
+ * while pending/failed (the glyphs carry delivery state), or when tapped.
+ *
+ * Tapping a message reveals its meta plus one "Actions" row; the history
+ * actions (edit / save / regenerate / revert) sit behind it, and the two
+ * that drop messages (revert, regenerate) ask for a confirm first — a
+ * stray tap must not silently lose conversation.
  */
 @Composable
 private fun ChatMessageRow(
     message: Message,
+    previousAt: Instant?,
+    messagesAfter: Int,
     expanded: Boolean,
     canRegenerate: Boolean,
     onClick: () -> Unit,
@@ -444,6 +577,10 @@ private fun ChatMessageRow(
     onRegenerate: () -> Unit,
     onSaveNote: () -> Unit,
 ) {
+    val delivered = message.status != MessageStatus.PENDING && message.status != MessageStatus.FAILED
+    val afterPause = previousAt == null ||
+        (message.createdAt - previousAt).inWholeSeconds >= TIME_GAP_SECONDS
+    val showMeta = expanded || !delivered || afterPause
     val meta = buildString {
         append(if (message.role == MessageRole.USER) "You" else "Assistant")
         append(" · ")
@@ -454,46 +591,97 @@ private fun ChatMessageRow(
             else -> Unit
         }
     }
+    var actionsOpen by remember(message.id) { mutableStateOf(false) }
+    var confirming by remember(message.id) { mutableStateOf<String?>(null) }
+    // Collapse the action state whenever the message itself collapses.
+    LaunchedEffect(expanded) {
+        if (!expanded) {
+            actionsOpen = false
+            confirming = null
+        }
+    }
     Column(Modifier.fillMaxWidth()) {
         if (message.role == MessageRole.USER) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                 CardMMD(onClick = onClick, modifier = Modifier.fillMaxWidth(0.85f)) {
                     Column(Modifier.padding(12.dp)) {
                         MarkdownText(raw = message.content, baseFontWeight = FontWeight.SemiBold)
-                        TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                        if (showMeta) {
+                            TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                        }
                     }
                 }
             }
         } else {
-            CardMMD(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    MarkdownText(raw = message.content)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onClick)
+                    .padding(vertical = 4.dp),
+            ) {
+                MarkdownText(raw = message.content)
+                if (showMeta) {
                     TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }
             }
         }
         if (expanded) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (message.role == MessageRole.USER) {
-                    ButtonMMD(onClick = onEdit, modifier = Modifier.weight(1f)) {
-                        TextMMD("Edit")
+            ListRow(
+                title = "Actions",
+                trailing = if (actionsOpen) "▾" else "▸",
+                onClick = {
+                    actionsOpen = !actionsOpen
+                    confirming = null
+                },
+            )
+            if (actionsOpen) {
+                when (confirming) {
+                    "revert" -> ConfirmRow(
+                        text = if (messagesAfter == 0) "Nothing after this message to drop."
+                        else "Drop the $messagesAfter message${if (messagesAfter == 1) "" else "s"} after this one? This can't be undone.",
+                        confirmLabel = "Revert",
+                        onConfirm = { confirming = null; onRevert() },
+                        onCancel = { confirming = null },
+                    )
+                    "regenerate" -> ConfirmRow(
+                        text = "Drop this reply and ask again? This can't be undone.",
+                        confirmLabel = "Regenerate",
+                        onConfirm = { confirming = null; onRegenerate() },
+                        onCancel = { confirming = null },
+                    )
+                    else -> {
+                        if (message.role == MessageRole.USER) {
+                            // Edit only fills the composer; nothing is dropped until Send.
+                            ListRow(title = "Edit") { onEdit() }
+                        } else {
+                            // T-022b: explicit transition — the reply text becomes
+                            // an inbox note verbatim (source: this thread).
+                            ListRow(title = "Save as note") { onSaveNote() }
+                        }
+                        if (canRegenerate) {
+                            ListRow(title = "Regenerate", subtitle = "Drops this reply") { confirming = "regenerate" }
+                        }
+                        ListRow(title = "Revert to here", subtitle = "Drops everything after") { confirming = "revert" }
                     }
-                } else {
-                    // T-022b: explicit transition — the reply text becomes
-                    // an inbox note verbatim (source: this thread).
-                    ButtonMMD(onClick = onSaveNote, modifier = Modifier.weight(1f)) {
-                        TextMMD("Save as note")
-                    }
-                }
-                if (canRegenerate) {
-                    ButtonMMD(onClick = onRegenerate, modifier = Modifier.weight(1f)) {
-                        TextMMD("Regenerate")
-                    }
-                }
-                ButtonMMD(onClick = onRevert, modifier = Modifier.weight(1f)) {
-                    TextMMD("Revert to here")
                 }
             }
+        }
+    }
+}
+
+/** Inline confirm for a destructive history action: text + Cancel / confirm. */
+@Composable
+private fun ConfirmRow(
+    text: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        ListRow(title = text)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ButtonMMD(onClick = onCancel, modifier = Modifier.weight(1f)) { TextMMD("Cancel") }
+            ButtonMMD(onClick = onConfirm, modifier = Modifier.weight(1f)) { TextMMD(confirmLabel) }
         }
     }
 }

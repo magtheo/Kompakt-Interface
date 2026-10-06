@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local verification gate — the project's source of truth for "green".
-# (GitHub Actions is disabled; this script is the CI. See TASKS.md note on T-001.)
+# (CI in .github/workflows/ci.yml runs the same three steps; this script is the local equivalent.)
 # Usage: scripts/verify.sh            — build, unit tests, lint
 #        scripts/verify.sh --clean    — same, from a cold Gradle cache
 set -euo pipefail

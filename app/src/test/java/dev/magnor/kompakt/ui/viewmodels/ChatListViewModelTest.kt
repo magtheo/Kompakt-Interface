@@ -95,7 +95,7 @@ class ChatListViewModelTest {
 
     @Test
     fun `state starts unloaded with empty lists while fetches are in flight`() = runTest {
-        val vm = ChatListViewModel(ColdChatListRepository(), ColdTopics(), ColdWorkspaces(), { "req" }, t0)
+        val vm = ChatListViewModel(ColdChatListRepository(), ColdTopics(), ColdWorkspaces(), t0)
         val collector = launch(UnconfinedTestDispatcher()) { vm.state.collect { } }
 
         val initial = vm.state.value
@@ -112,7 +112,7 @@ class ChatListViewModelTest {
             ColdChatListRepository(flowOf(listOf(thread("chat_1")))), // threads landed…
             ColdTopics(), // …topics still in flight — combine must wait
             ColdWorkspaces(flowOf(listOf(Workspace(ref = "roblox-toolkit", label = "Roblox Toolkit")))),
-            { "req" }, t0,
+            t0,
         )
         val collector = launch(UnconfinedTestDispatcher()) { vm.state.collect { } }
 
@@ -127,7 +127,7 @@ class ChatListViewModelTest {
             ColdChatListRepository(flowOf(expected)),
             ColdTopics(flowOf(listOf(ChatTopic(id = "evershift", label = "Evershift")))),
             ColdWorkspaces(flowOf(listOf(Workspace(ref = "roblox-toolkit", label = "Roblox Toolkit")))),
-            { "req" }, t0,
+            t0,
         )
         val collector = launch(UnconfinedTestDispatcher()) { vm.state.collect { } }
 
@@ -145,7 +145,7 @@ class ChatListViewModelTest {
             ColdChatListRepository(flowOf(emptyList())), // fetch landed: honest empty
             ColdTopics(flowOf(listOf(ChatTopic(id = "evershift", label = "Evershift")))),
             ColdWorkspaces(flowOf(listOf(Workspace(ref = "roblox-toolkit", label = "Roblox Toolkit")))),
-            { "req" }, t0,
+            t0,
         )
         val collector = launch(UnconfinedTestDispatcher()) { vm.state.collect { } }
 
@@ -155,44 +155,4 @@ class ChatListViewModelTest {
         collector.cancel()
     }
 
-    // ── new-chat creation (moved from ChatViewModelsTest, T-009/T-022d) ──
-
-    @Test
-    fun `new chat emits created id and consume clears it`() = runTest {
-        var createdCount = 0
-        val repo = ColdChatListRepository()
-        repo.createOutcome = { draft ->
-            createdCount++
-            ChatThread(id = "chat_9", title = draft.title, createdAt = t0, updatedAt = t0)
-        }
-        val vm = ChatListViewModel(repo, ColdTopics(), ColdWorkspaces(), { "req-1" }, t0)
-        vm.newChat()
-        assertEquals("chat_9", vm.created.value)
-        vm.consumeCreated()
-        assertNull(vm.created.value)
-        assertEquals(1, createdCount)
-    }
-
-    @Test
-    fun `new chat carries the picked scope into the create draft`() = runTest {
-        val drafts = mutableListOf<ChatThreadDraft>()
-        val repo = ColdChatListRepository()
-        repo.createOutcome = { draft ->
-            drafts.add(draft)
-            ChatThread(id = "chat_10", title = draft.title, createdAt = t0, updatedAt = t0)
-        }
-        val vm = ChatListViewModel(repo, ColdTopics(), ColdWorkspaces(), { "req-2" }, t0)
-
-        vm.newChat("workspace", "roblox-toolkit")
-        vm.newChat("topic", "evershift")
-        vm.newChat()
-
-        assertEquals(3, drafts.size)
-        assertEquals("workspace", drafts[0].scopeType)
-        assertEquals("roblox-toolkit", drafts[0].scopeRef)
-        assertEquals("topic", drafts[1].scopeType)
-        assertEquals("evershift", drafts[1].scopeRef)
-        assertNull(drafts[2].scopeType) // General — no scope fields on the wire
-        assertNull(drafts[2].scopeRef)
-    }
 }
