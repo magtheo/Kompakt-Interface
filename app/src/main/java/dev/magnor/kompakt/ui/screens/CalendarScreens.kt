@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +58,16 @@ fun CalendarScreen(
     // composition-local route — see VoiceUi) distinguishes Offline from
     // Loading while the window fetch is in flight.
     val transport by LocalAppContainer.current.transportStatus.collectAsState()
+
+    // Writes (delete/edit in detail, create in editor) go through
+    // EventViewModel — this snapshot never hears about them. Refetch the
+    // window each time the screen re-enters composition after being away
+    // (the backstack entry keeps this ViewModel alive across navigation);
+    // the first entry is already covered by the ViewModel's init load.
+    var enteredBefore by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (enteredBefore) viewModel.refresh() else enteredBefore = true
+    }
 
     AppScreen(
         title = "Calendar",
@@ -210,6 +221,12 @@ fun EventDetailScreen(
     var confirmDelete by remember { mutableStateOf(false) }
 
     LaunchedEffect(eventId) { viewModel.load(eventId) }
+    // Pop back after a successful delete so the user lands on the
+    // refreshed calendar instead of a detail screen for a dead event
+    // (same pattern as the editor's saved/deleted pop below).
+    LaunchedEffect(state.deleted) {
+        if (state.deleted) onBack()
+    }
 
     AppScreen(
         title = state.event?.title ?: if (state.loading) "Event" else "Event not found",
