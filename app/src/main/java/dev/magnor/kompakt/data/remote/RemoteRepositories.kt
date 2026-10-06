@@ -48,7 +48,9 @@ import dev.magnor.kompakt.domain.TodayProjection
 import dev.magnor.kompakt.domain.KompaktJson
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Instant
@@ -105,13 +107,42 @@ class RemoteTodayRepository(private val api: HttpApi) : TodayRepository {
  * connectivity. observeToday is exempt: Today renders its own honest
  * error line (T-024) from the failure itself.
  */
-private fun <T> degradeTransport(fallback: T, fetch: suspend () -> T): Flow<T> =
-    flow { emit(fetch()) }.catch { e ->
-        when (e) {
-            is OfflineException, is ServerUnavailableException -> emit(fallback)
-            else -> throw e
+// internal (not private) so TransportHealTest can exercise the heal loop
+// directly with a fake status flow (T-052).
+internal fun <T> degradeTransport(
+    transport: StateFlow<TransportStatus>,
+    fallback: T,
+    fetch: suspend () -> T,
+): Flow<T> = flow { emit(fetch()) }.catch { e ->
+    when (e) {
+        is OfflineException, is ServerUnavailableException -> {
+            emit(fallback)
+            // T-052 (D037 residual, found in the T-051 device smoke): a
+            // degraded emission used to COMPLETE the flow, so a VM's
+            // stateIn cache held the fallback forever — after the
+            // transport healed (a sibling screen's fetch marking Ok at
+            // the HttpApi choke point), tri-states fell back to the
+            // cached tier and rendered a false "No X configured" until
+            // the next navigation. Instead: await Degraded→Ok on the
+            // shared status, then refetch while still subscribed. A
+            // failing retry re-marks Degraded inside execute, so the
+            // next first{Ok} blocks until a genuine heal — no busy
+            // loop, and the fallback is not re-emitted (the last value
+            // already is the fallback). First success still completes
+            // the flow: fresh data needs no correction.
+            while (true) {
+                transport.first { it is TransportStatus.Ok }
+                try {
+                    emit(fetch())
+                    return@catch
+                } catch (retry: OfflineException) {
+                } catch (retry: ServerUnavailableException) {
+                }
+            }
         }
+        else -> throw e
     }
+}
 
 class RemoteTaskRepository(private val api: HttpApi) : TaskRepository {
     private suspend fun tasks(filter: TaskFilter): List<Task> = when (filter) {
@@ -128,9 +159,9 @@ class RemoteTaskRepository(private val api: HttpApi) : TaskRepository {
     private suspend fun fetch(): List<Task> = api.decodeList("/v1/tasks", "tasks")
 
     override fun observeTasks(filter: TaskFilter): Flow<List<Task>> =
-        degradeTransport(emptyList()) { tasks(filter) }
+        degradeTransport(api.transport, emptyList()) { tasks(filter) }
     override fun observeTask(id: EntityId): Flow<Task?> =
-        degradeTransport<Task?>(null) { getTask(id) }
+        degradeTransport<Task?>(api.transport, null) { getTask(id) }
     override suspend fun getTask(id: EntityId): Task? = fetch().firstOrNull { it.id == id }
     override suspend fun createTask(draft: TaskDraft, requestId: RequestId): Task =
         writesLandInPhase6("creating tasks")
@@ -165,7 +196,7 @@ class RemoteNoteRepository(private val api: HttpApi) : NoteRepository {
     )
 
     override fun observeNotes(projectId: EntityId?, areaId: EntityId?): Flow<List<Note>> =
-        degradeTransport(emptyList()) {
+        degradeTransport(api.transport, emptyList()) {
             val query = buildMap {
                 if (projectId != null) put("project_id", projectId)
                 if (areaId != null) put("area_id", areaId)
@@ -174,7 +205,7 @@ class RemoteNoteRepository(private val api: HttpApi) : NoteRepository {
         }
 
     override fun observeNote(id: EntityId): Flow<Note?> =
-        degradeTransport<Note?>(null) { getNote(id) }
+        degradeTransport<Note?>(api.transport, null) { getNote(id) }
 
     override suspend fun getNote(id: EntityId): Note? = try {
         api.decode<NoteEnvelope>("/v1/notes/$id").note
@@ -214,18 +245,18 @@ class RemoteNoteRepository(private val api: HttpApi) : NoteRepository {
 
 class RemoteOrganizationRepository(private val api: HttpApi) : OrganizationRepository {
     override fun observeProjects(): Flow<List<Project>> =
-        degradeTransport(emptyList()) { api.decodeList("/v1/projects", "projects") }
+        degradeTransport(api.transport, emptyList()) { api.decodeList("/v1/projects", "projects") }
     override fun observeProject(id: EntityId): Flow<Project?> =
         observeProjects().map { list -> list.firstOrNull { it.id == id } }
     override fun observeAreas(): Flow<List<Area>> =
-        degradeTransport(emptyList()) { api.decodeList("/v1/areas", "areas") }
+        degradeTransport(api.transport, emptyList()) { api.decodeList("/v1/areas", "areas") }
     override fun observeArea(id: EntityId): Flow<Area?> =
         observeAreas().map { list -> list.firstOrNull { it.id == id } }
 }
 
 class RemoteInboxRepository(private val api: HttpApi) : InboxRepository {
     override fun observeInbox(): Flow<List<InboxItem>> =
-        degradeTransport(emptyList()) { api.decodeList("/v1/inbox", "inbox_items") }
+        degradeTransport(api.transport, emptyList()) { api.decodeList("/v1/inbox", "inbox_items") }
     override suspend fun dismiss(id: EntityId, expectedRevision: Long, requestId: RequestId) {
         // V-057 read endpoint; derived alerts 404 → caller treats as no-op.
         api.post("/v1/inbox/$id/read", "{}", requestId)
@@ -234,11 +265,11 @@ class RemoteInboxRepository(private val api: HttpApi) : InboxRepository {
 
 class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
     override fun observeThreads(): Flow<List<ChatThread>> =
-        degradeTransport(emptyList()) { api.decodeList("/v1/chats", "chats") }
+        degradeTransport(api.transport, emptyList()) { api.decodeList("/v1/chats", "chats") }
     override fun observeThread(id: EntityId): Flow<ChatThread?> =
         observeThreads().map { list -> list.firstOrNull { it.id == id } }
     override fun observeMessages(chatId: EntityId): Flow<List<Message>> =
-        degradeTransport(emptyList()) { api.decodeList("/v1/chats/$chatId/messages", "messages") }
+        degradeTransport(api.transport, emptyList()) { api.decodeList("/v1/chats/$chatId/messages", "messages") }
 
     override suspend fun getThread(id: EntityId): ChatThread? = try {
         api.decode<ChatEnvelope>("/v1/chats/$id").chat
@@ -342,10 +373,10 @@ class RemoteChatRepository(private val api: HttpApi) : ChatRepository {
 
 class RemoteAgentRepository(private val api: HttpApi) : AgentRepository {
     override fun observeSurface(): Flow<AgentsSurface> =
-        degradeTransport(AgentsSurface()) { api.decode("/v1/agents") }
+        degradeTransport(api.transport, AgentsSurface()) { api.decode("/v1/agents") }
 
     override fun observeRuns(): Flow<List<AgentRun>> =
-        degradeTransport(emptyList()) { api.decodeList("/v1/agent-runs", "agent_runs") }
+        degradeTransport(api.transport, emptyList()) { api.decodeList("/v1/agent-runs", "agent_runs") }
 
     override fun observeRun(id: String): Flow<AgentRun?> = observeRuns().map { list ->
         list.firstOrNull { it.id == id }
@@ -511,11 +542,11 @@ class RemoteCaptureRepository(private val api: HttpApi) : CaptureRepository {
 /** T-022c: workspace registry read — reference data, {ref, label} only. */
 class RemoteWorkspaceRepository(private val api: HttpApi) : WorkspaceRepository {
     override fun observeWorkspaces(): Flow<List<Workspace>> =
-        degradeTransport(emptyList()) { api.decodeList("/v1/workspaces", "workspaces") }
+        degradeTransport(api.transport, emptyList()) { api.decodeList("/v1/workspaces", "workspaces") }
 }
 
 /** T-022d: topic registry read — the notes sorter's buckets, {id, label} only. */
 class RemoteTopicRepository(private val api: HttpApi) : TopicRepository {
     override fun observeTopics(): Flow<List<ChatTopic>> =
-        degradeTransport(emptyList()) { api.decodeList("/v1/chat/topics", "topics") }
+        degradeTransport(api.transport, emptyList()) { api.decodeList("/v1/chat/topics", "topics") }
 }

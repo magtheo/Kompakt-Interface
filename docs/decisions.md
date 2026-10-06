@@ -947,3 +947,15 @@ Rejected alternative: repository signatures → `Flow<FetchResult<T>>` — ~10
 repositories + fakes + every view model rewritten, churn with no extra
 user-visible gain. Implementation: T-051
 (`docs/plans/2026-09-26-t051-honest-load-states.md`).
+
+Amendment (Oct 6, 2026 — T-052): D037 left a residual surfaced by the
+T-051 device smoke: a degraded emission COMPLETED the repository flow,
+so a subscribed VM's `stateIn` cache held the fallback after the
+transport healed — tri-states correctly fell back to the cached tier,
+which rendered a false "No X configured" until the next navigation.
+Resolution stays inside D037's shape (no signature churn):
+`degradeTransport` now carries the shared status, and after a degraded
+emission it awaits Degraded→Ok (marked by any sibling request's success
+at the HttpApi choke point) and refetches while subscribed; the first
+success still completes the flow. All observe flows heal at once —
+repository layer, not per-screen affordances.
