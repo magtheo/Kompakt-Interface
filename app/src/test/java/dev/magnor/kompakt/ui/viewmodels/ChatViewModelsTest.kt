@@ -80,7 +80,7 @@ private object StaticWorkspaces : WorkspaceRepository {
 private class ColdChatRepository(
     var snapshot: List<Message>,
     var thread: ChatThread? = null,
-    var sendOutcome: (EntityId, String) -> ChatExchange = { _, text ->
+    var sendOutcome: suspend (EntityId, String) -> ChatExchange = { _, text ->
         throw IllegalStateException("not expected")
     },
 ) : ChatRepository {
@@ -195,6 +195,67 @@ class ChatThreadViewModelTest {
         assertTrue(ChatSendState.Idle == vm.sendState.value)
         assertEquals("", vm.draft.value)
         collector.cancel()
+    }
+
+    /**
+     * T-053: the send POST is held open for the whole agent turn
+     * (RemoteChatRepository: timeoutSeconds = 120). Long before it returns,
+     * the server has persisted the user message and flagged pending_reply —
+     * so the V-063 poll refetches a snapshot that already contains the
+     * server's copy. The optimistic local row must reconcile against that
+     * snapshot or the sender sees their own message twice until the ack.
+     */
+    @Test
+    fun `poll refetch while the send POST is in flight does not duplicate the outgoing message`() = runTest {
+        // Share runTest's scheduler with Main so delay() is virtual-time driven.
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        val turnSettled = CompletableDeferred<Unit>()
+        repo = ColdChatRepository(snapshot = emptyList(), thread = generalThread().copy(pendingReply = true))
+        repo.sendOutcome = { _, text ->
+            turnSettled.await() // POST held open for the whole agent turn
+            val user = msg("chatmsg:u1", MessageRole.USER, text)
+            val assistant = msg("chatmsg:a1", MessageRole.ASSISTANT, "reply to $text")
+            repo.snapshot = listOf(user, assistant)
+            ChatExchange(user, assistant)
+        }
+        val vm = ChatThreadViewModel(repo, StaticTopics, StaticWorkspaces, StaticNotes,"chat_1", { "req-dup" }, { t0 })
+        val collector = launch(UnconfinedTestDispatcher()) { vm.messages.collect { } }
+        testScheduler.runCurrent()
+
+        try {
+            vm.onDraftChange("hello server")
+            vm.send()
+            testScheduler.runCurrent()
+            assertEquals(1, vm.messages.value.size) // optimistic PENDING row on screen
+            assertEquals(MessageStatus.PENDING, vm.messages.value[0].status)
+
+            // Mid-turn: the server already holds the user message; the pending
+            // poll (15 s cadence) refetches and the snapshot carries the copy.
+            repo.snapshot = listOf(msg("chatmsg:u1", MessageRole.USER, "hello server"))
+            testScheduler.advanceTimeBy(15_000)
+            testScheduler.runCurrent()
+
+            // The outgoing message must render exactly once.
+            assertEquals(1, vm.messages.value.count { it.role == MessageRole.USER })
+            assertEquals("hello server", vm.messages.value.single { it.role == MessageRole.USER }.content)
+
+            // Turn settles: the POST returns, the refresh tick dedupes by id.
+            turnSettled.complete(Unit)
+            testScheduler.runCurrent()
+            val rendered = vm.messages.value
+            assertEquals(2, rendered.size)
+            assertTrue(rendered.all { it.status != MessageStatus.PENDING })
+            assertTrue(ChatSendState.Idle == vm.sendState.value)
+        } finally {
+            // ALWAYS drain: on failure the re-arming poll delay (and the
+            // suspended POST await) would otherwise spin runTest's virtual
+            // clock forever — a hang instead of a red result.
+            turnSettled.complete(Unit)
+            repo.thread = generalThread() // pending_reply clears → loop exits
+            testScheduler.advanceTimeBy(30_000)
+            testScheduler.runCurrent()
+            collector.cancel()
+        }
     }
 
     @Test

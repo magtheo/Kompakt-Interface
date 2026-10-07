@@ -197,7 +197,22 @@ class ChatThreadViewModel(
         overlay,
     ) { fetched, extra ->
         val fetchedIds = fetched.mapTo(HashSet()) { it.id }
-        fetched + extra.filter { it.id !in fetchedIds }
+        // T-053: the send POST is held open for the whole agent turn (up to
+        // 120 s), but the server persists the outgoing message long before
+        // the exchange returns — the pending-reply poll (and any heal-driven
+        // refetch) therefore lands a snapshot that already contains it. The
+        // synthetic local row can never dedupe by id, so reconcile it by
+        // role+content instead; without this the sender sees their own
+        // message twice until the ack. Exact request-id matching would need
+        // it on the message wire — §11 keys ride only the exchange. Edge:
+        // a second identical send while the first is still in flight briefly
+        // collapses to one row; self-corrects when its ack + tick land.
+        val pendingRow = extra.firstOrNull { it.id == LOCAL_PENDING_ID }
+        val serverEchoed = pendingRow != null &&
+            fetched.any { it.role == MessageRole.USER && it.content == pendingRow.content }
+        fetched + extra.filter {
+            it.id !in fetchedIds && !(serverEchoed && it.id == LOCAL_PENDING_ID)
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
