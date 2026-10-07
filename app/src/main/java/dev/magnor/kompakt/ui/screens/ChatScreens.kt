@@ -45,6 +45,10 @@ import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
 import dev.magnor.kompakt.sync.TunnelController
 import dev.magnor.kompakt.ui.ThinCard
+import dev.magnor.kompakt.ui.FlatRow
+import dev.magnor.kompakt.ui.HairlineDivider
+import dev.magnor.kompakt.ui.PrimaryActionRow
+import dev.magnor.kompakt.ui.ZoneHeading
 import dev.magnor.kompakt.ui.LocalAppContainer
 import dev.magnor.kompakt.ui.MarkdownText
 import dev.magnor.kompakt.voice.MicButton
@@ -87,14 +91,15 @@ fun ChatListScreen(
     var newChatExpanded by remember { mutableStateOf(false) }
 
     AppScreen(title = "Chats") {
-        // T-022d: chat scope picker — General (no context), vault topics, or
-        // workspaces (OpenCode sessions). Choice at creation only; the
-        // thread header can re-scope later.
+        // T-056: zoned layout — actions and content stop sharing one skin.
+        // START zone holds the creation affordances (inverted primary button
+        // + quiet expander); RECENT zone is a flat, divided list. Scoped
+        // chats (topic / workspace) live behind the secondary row.
         // General is the everyday chat (D034): one tap straight into it.
-        // Scoped chats (topic / workspace) live behind the secondary row.
-        ListRow(
+        ZoneHeading("Start")
+        PrimaryActionRow(
             title = "New chat",
-            subtitle = "General — no topic context",
+            subtitle = "General",
             trailing = "+",
             onClick = {
                 newChatExpanded = false
@@ -102,17 +107,21 @@ fun ChatListScreen(
             },
         )
         if (topics.isNotEmpty() || workspaces.isNotEmpty()) {
-            ListRow(
-                title = "New chat in a topic or workspace…",
+            FlatRow(
+                title = "In a topic or workspace…",
                 trailing = if (newChatExpanded) "▾" else "▸",
                 onClick = { newChatExpanded = !newChatExpanded },
+                modifier = Modifier.padding(start = 12.dp),
             )
         }
         if (newChatExpanded) {
             if (topics.isNotEmpty()) {
                 SectionLabel("Topics")
                 state.topics.forEach { topic ->
-                    ListRow(title = topic.label) {
+                    FlatRow(
+                        title = topic.label,
+                        modifier = Modifier.padding(start = 12.dp),
+                    ) {
                         newChatExpanded = false
                         onNewChat("topic", topic.id, topic.label)
                     }
@@ -121,43 +130,49 @@ fun ChatListScreen(
             if (state.workspaces.isNotEmpty()) {
                 SectionLabel("Workspaces")
                 state.workspaces.forEach { workspace ->
-                    ListRow(title = workspace.label, subtitle = workspace.ref) {
+                    FlatRow(
+                        title = workspace.label,
+                        subtitle = workspace.ref,
+                        modifier = Modifier.padding(start = 12.dp),
+                    ) {
                         newChatExpanded = false
                         onNewChat("workspace", workspace.ref, workspace.label)
                     }
                 }
             }
         }
+        ZoneHeading("Recent")
         // T-051 tri-state: Loading / Offline / genuine "No chats yet" — never
         // a false empty while the fetches are in flight or the tunnel is down.
         // D037: degradeTransport swallows offline failures into empty
         // emissions, so loaded+empty+Degraded may be a fake empty —
         // honest-first shows Offline instead of an empty list we can't confirm.
         when {
-            state.threads.isNotEmpty() -> state.threads.forEach { thread ->
-                ListRow(
+            state.threads.isNotEmpty() -> state.threads.forEachIndexed { index, thread ->
+                FlatRow(
                     title = thread.title,
                     subtitle = listOfNotNull(thread.scopeLabel, thread.lastMessagePreview)
                         .joinToString(" · "),
                     trailing = thread.updatedAt.relativeTo(viewModel.now),
                     onClick = { onOpenThread(thread.id) },
                 )
+                if (index < state.threads.lastIndex) HairlineDivider()
             }
             !state.loaded && transport is TransportStatus.Degraded ->
-                ListRow(
+                FlatRow(
                     title = "Offline — server unreachable",
                     subtitle = "Will load when connection returns",
                 )
-            !state.loaded -> ListRow(
+            !state.loaded -> FlatRow(
                 title = "Loading chats…",
                 subtitle = tunnelPhaseSubtitle(tunnel),
             )
             transport is TransportStatus.Degraded ->
-                ListRow(
+                FlatRow(
                     title = "Offline — server unreachable",
                     subtitle = "Can't confirm empty while offline",
                 )
-            else -> EmptyState("No chats yet", "Tap New chat to start")
+            else -> FlatRow(title = "No chats yet", subtitle = "Tap New chat to start")
         }
     }
 }
