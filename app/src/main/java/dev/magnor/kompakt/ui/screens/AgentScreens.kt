@@ -26,7 +26,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.buttons.OutlinedButtonMMD
-import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.data.remote.TransportStatus
 import dev.magnor.kompakt.domain.AgentBackendInfo
@@ -36,6 +35,7 @@ import dev.magnor.kompakt.domain.AgentRun
 import dev.magnor.kompakt.domain.AgentRunKind
 import dev.magnor.kompakt.domain.AgentRunState
 import dev.magnor.kompakt.domain.AgentsSurface
+import dev.magnor.kompakt.ui.ThinCard
 import dev.magnor.kompakt.ui.LocalAppContainer
 import dev.magnor.kompakt.ui.MarkdownText
 import dev.magnor.kompakt.voice.MicButton
@@ -449,7 +449,7 @@ fun AgentRunDetailScreen(
             } else run?.let { r: AgentRun ->
                 // Status summary — one line instead of a metadata dashboard.
                 item(key = "status") {
-                    CardMMD(Modifier.fillMaxWidth()) {
+                    ThinCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp)) {
                             TextMMD(
                                 "${runGlyph(r.state)} ${r.state.wire} · ${r.backend}/${r.agent.ifBlank { "—" }}",
@@ -470,7 +470,7 @@ fun AgentRunDetailScreen(
                 }
                 if (detailsOpen) {
                     item(key = "details") {
-                        CardMMD(Modifier.fillMaxWidth()) {
+                    ThinCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp)) {
                                 DetailRow(label = "Kind", value = r.kind.wire)
                                 r.prompt?.let { DetailRow(label = "Objective", value = it) }
@@ -495,7 +495,7 @@ fun AgentRunDetailScreen(
 
                 result?.let { res ->
                     item(key = "result") {
-                        CardMMD(Modifier.fillMaxWidth()) {
+                    ThinCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp)) {
                                 TextMMD("Result", fontWeight = FontWeight.Bold)
                                 res.summary?.let { TextMMD(it, modifier = Modifier.padding(top = 4.dp)) }
@@ -674,8 +674,10 @@ private fun ChatEventRow(event: AgentEvent) {
     val fromUser = (event.role ?: event.kind).startsWith("user")
     if (fromUser) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-            CardMMD(modifier = Modifier.fillMaxWidth(0.85f)) {
-                Column(Modifier.padding(12.dp)) {
+            // T-054: hairline card, 0.92f width, 8dp padding — mirrors the
+            // chat thread's user row geometry exactly.
+            ThinCard(Modifier.fillMaxWidth(0.92f)) {
+                Column(Modifier.padding(8.dp)) {
                     MarkdownText(
                         raw = event.text ?: "—",
                         baseFontWeight = FontWeight.SemiBold,
@@ -684,8 +686,8 @@ private fun ChatEventRow(event: AgentEvent) {
             }
         }
     } else {
-        CardMMD(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp)) {
+        ThinCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(8.dp)) {
                 MarkdownText(raw = event.text ?: "—")
             }
         }

@@ -27,9 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
 import com.mudita.mmd.components.top_app_bar.TopAppBarMMD
+import dev.magnor.kompakt.ui.ThinCard
 
 /** Shared building blocks for Phase 1 placeholder screens. */
 
@@ -108,11 +108,11 @@ fun ListRow(
     // static rows (errors, notices, feedback) have nowhere else to be read
     // in full and stay untruncated.
     if (onClick != null) {
-        CardMMD(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        ThinCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
             ListRowContent(title, subtitle, trailing, secondary, capLines = true)
         }
     } else {
-        CardMMD(modifier = Modifier.fillMaxWidth()) {
+        ThinCard(modifier = Modifier.fillMaxWidth()) {
             ListRowContent(title, subtitle, trailing, secondary, capLines = false)
         }
     }
@@ -212,7 +212,9 @@ fun ChatScaffold(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            // T-054: 12dp side margins (was 16) — transcript text buys back
+            // 8dp of width on the 380dp panel; still clear of the bezel.
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             transcript()
@@ -220,7 +222,7 @@ fun ChatScaffold(
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             composer()
         }

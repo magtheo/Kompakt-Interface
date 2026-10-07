@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.datetime.Instant
 import com.mudita.mmd.components.buttons.ButtonMMD
-import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.data.remote.TransportStatus
 import dev.magnor.kompakt.domain.EntityId
@@ -44,6 +43,7 @@ import dev.magnor.kompakt.domain.Message
 import dev.magnor.kompakt.domain.MessageRole
 import dev.magnor.kompakt.domain.MessageStatus
 import dev.magnor.kompakt.sync.TunnelController
+import dev.magnor.kompakt.ui.ThinCard
 import dev.magnor.kompakt.ui.LocalAppContainer
 import dev.magnor.kompakt.ui.MarkdownText
 import dev.magnor.kompakt.voice.MicButton
@@ -553,11 +553,12 @@ private fun tunnelPhaseSubtitle(tunnel: TunnelController.State?): String? =
     }
 
 /**
- * One message. Monochrome sender coding: user = right-shifted bordered card,
- * semi-bold; assistant = plain full-width text (no card — a long thread
- * should not read as a stack of boxes). The sender/time meta line is quiet
- * by default: shown on the first message, after a pause of [TIME_GAP_SECONDS],
- * while pending/failed (the glyphs carry delivery state), or when tapped.
+ * One message. Monochrome sender coding: user = right-shifted hairline
+ * card (T-054), semi-bold; assistant = plain full-width text (no card — a
+ * long thread should not read as a stack of boxes). The sender/time meta
+ * line is quiet by default: shown on the first message, after a pause of
+ * [TIME_GAP_SECONDS], while pending/failed (the glyphs carry delivery
+ * state), or when tapped.
  *
  * Tapping a message reveals its meta plus one "Actions" row; the history
  * actions (edit / save / regenerate / revert) sit behind it, and the two
@@ -603,8 +604,11 @@ private fun ChatMessageRow(
     Column(Modifier.fillMaxWidth()) {
         if (message.role == MessageRole.USER) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                CardMMD(onClick = onClick, modifier = Modifier.fillMaxWidth(0.85f)) {
-                    Column(Modifier.padding(12.dp)) {
+                // T-054: hairline card at 0.92f width (was 0.85f) with 8dp
+                // inner padding (was 12) — the right-shift coding stays, but
+                // a row buys back ~25dp of text width and 8dp of height.
+                ThinCard(onClick = onClick, modifier = Modifier.fillMaxWidth(0.92f)) {
+                    Column(Modifier.padding(8.dp)) {
                         MarkdownText(raw = message.content, baseFontWeight = FontWeight.SemiBold)
                         if (showMeta) {
                             TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
@@ -613,11 +617,13 @@ private fun ChatMessageRow(
                 }
             }
         } else {
+            // T-054: no per-row vertical padding — the LazyColumn's
+            // spacedBy(8dp) is the single gap authority, so turn spacing is
+            // a uniform 8dp instead of 12–16dp depending on neighbour.
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onClick)
-                    .padding(vertical = 4.dp),
+                    .clickable(onClick = onClick),
             ) {
                 MarkdownText(raw = message.content)
                 if (showMeta) {

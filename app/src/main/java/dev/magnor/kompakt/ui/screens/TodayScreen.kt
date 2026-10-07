@@ -35,10 +35,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
 import dev.magnor.kompakt.domain.EntityKind
 import dev.magnor.kompakt.domain.InboxItem
+import dev.magnor.kompakt.ui.ThinCard
 import dev.magnor.kompakt.ui.containerViewModel
 import dev.magnor.kompakt.ui.timeOfDay
 import dev.magnor.kompakt.ui.untilLabel
@@ -103,7 +103,7 @@ fun TodayScreen(
         // T-033: fake mode reads as real data on a fresh install — one honest
         // banner with a direct path to enrollment, dismissable for the session.
         if (notEnrolled && !nudgeDismissed.value) {
-            CardMMD(modifier = Modifier.fillMaxWidth()) {
+            ThinCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -272,7 +272,7 @@ private fun RowScope.TodayTabLabel(text: String, selected: Boolean, onClick: () 
 private fun NowPage(state: TodayUiState, now: Instant) {
     val hero = state.nextUp
     if (hero != null) {
-        CardMMD(modifier = Modifier.fillMaxWidth()) {
+        ThinCard(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 TextMMD(text = "NEXT UP")
                 TextMMD(text = hero.title, fontWeight = FontWeight.Bold)

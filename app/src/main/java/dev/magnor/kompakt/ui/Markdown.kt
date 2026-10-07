@@ -26,7 +26,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mudita.mmd.components.cards.CardMMD
 import com.mudita.mmd.components.text.TextMMD
 
 /**
@@ -299,7 +298,7 @@ fun MarkdownText(
                             .padding(start = 10.dp),
                     )
                 }
-                is MdBlock.CodeBlock -> CardMMD(modifier = Modifier.fillMaxWidth()) {
+                is MdBlock.CodeBlock -> ThinCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp)) {
                         block.lines.forEach { codeLine ->
                             TextMMD(
