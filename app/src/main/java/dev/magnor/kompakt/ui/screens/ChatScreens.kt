@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -609,7 +610,12 @@ private fun ChatMessageRow(
                 // a row buys back ~25dp of text width and 8dp of height.
                 ThinCard(onClick = onClick, modifier = Modifier.fillMaxWidth(0.92f)) {
                     Column(Modifier.padding(8.dp)) {
-                        MarkdownText(raw = message.content, baseFontWeight = FontWeight.SemiBold)
+                        // T-055: selectable body only — meta and the Actions
+                        // rows below stay outside SelectionContainer so a copy
+                        // never picks up "You · 06:55" noise or button labels.
+                        SelectionContainer {
+                            MarkdownText(raw = message.content, baseFontWeight = FontWeight.SemiBold)
+                        }
                         if (showMeta) {
                             TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                         }
@@ -625,7 +631,11 @@ private fun ChatMessageRow(
                     .fillMaxWidth()
                     .clickable(onClick = onClick),
             ) {
-                MarkdownText(raw = message.content)
+                // T-055: selectable body; row tap still expands (selection
+                // claims only long-press + drag, plain taps pass through).
+                SelectionContainer {
+                    MarkdownText(raw = message.content)
+                }
                 if (showMeta) {
                     TextMMD(text = meta, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }

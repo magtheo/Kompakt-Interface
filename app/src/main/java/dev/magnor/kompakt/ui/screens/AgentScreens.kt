@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -678,17 +679,19 @@ private fun ChatEventRow(event: AgentEvent) {
             // chat thread's user row geometry exactly.
             ThinCard(Modifier.fillMaxWidth(0.92f)) {
                 Column(Modifier.padding(8.dp)) {
-                    MarkdownText(
-                        raw = event.text ?: "—",
-                        baseFontWeight = FontWeight.SemiBold,
-                    )
+                    SelectionContainer {
+                        MarkdownText(
+                            raw = event.text ?: "—",
+                            baseFontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
         }
     } else {
         ThinCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(8.dp)) {
-                MarkdownText(raw = event.text ?: "—")
+                SelectionContainer { MarkdownText(raw = event.text ?: "—") }
             }
         }
     }
